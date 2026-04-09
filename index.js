@@ -6,7 +6,7 @@ import cheerio from "cheerio";
 process.on("unhandledRejection", (err) => console.error("Unhandled Rejection:", err));
 process.on("uncaughtException", (err) => console.error("Uncaught Exception:", err));
 
-// Environment variables
+// Runtime environment variables
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const JSR_ROLE_ID = process.env.JSR_ROLE_ID;
@@ -137,4 +137,4 @@ client.once("ready", async () => {
   }, INTERVAL);
 });
 
-client.login(TOKEN).catch(err => console.error("Failed to login:", err));
+client.login(TOKEN).catch(err => console.error("Failed to login:", err));,
