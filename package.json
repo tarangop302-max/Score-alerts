@@ -1,12 +1,17 @@
 {
-  "name": "jsr-bot",
+  "name": "slither-alert-bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Discord alert bot for NTL Slither.io",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js"
   },
   "dependencies": {
-    "discord.js": "^14.0.0",
-    "cheerio": "^1.0.0"
-  }
+    "cheerio": "^1.0.0-rc.12",
+    "discord.js": "^14.13.0",
+    "node-fetch": "^3.3.1"
+  },
+  "type": "module",
+  "author": "",
+  "license": "MIT"
 }
