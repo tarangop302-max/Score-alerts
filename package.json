@@ -2,10 +2,10 @@
   "name": "slither-alert-bot",
   "version": "1.0.0",
   "description": "Discord alert bot for NTL Slither.io",
-  "main": "bot.js",
+  "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node index.js"
   },
   "engines": {
     "node": ">=18.0.0"
