@@ -2,12 +2,8 @@ const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const cheerio = require("cheerio");
 
 // Crash protection
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled Rejection:", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
-});
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
@@ -85,15 +81,22 @@ client.once("ready", async () => {
 
   console.log("✅ Channel OK");
 
-  // START MESSAGE
-  await channel.send("🟢 BOT ONLINE 🚀");
+  // 🔥 FORCE SEND START MESSAGE
+  try {
+    await channel.send("🟢 BOT ONLINE 🚀");
+    console.log("✅ Start message sent");
+  } catch (err) {
+    console.error("❌ Send failed:", err.message);
+  }
 
-  // EVERY 30 MIN
-  setInterval(() => {
-    channel.send("🟢 BOT STILL ONLINE 🚀");
+  // 🔁 EVERY 30 MIN
+  setInterval(async () => {
+    try {
+      await channel.send("🟢 BOT STILL ONLINE 🚀");
+    } catch {}
   }, 30 * 60 * 1000);
 
-  // MAIN LOOP
+  // 🔁 MAIN LOOP
   setInterval(async () => {
     try {
       console.log("Checking leaderboard...");
