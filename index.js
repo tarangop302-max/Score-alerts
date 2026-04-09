@@ -90,6 +90,15 @@ client.once("ready", async () => {
 
   const channel = await client.channels.fetch(CHANNEL_ID);
 
+  // 🔥 SEND ON START
+  await channel.send("🟢 **JSR ALERT BOT STARTED & ONLINE 🚀**");
+
+  // 🔁 SEND EVERY 30 MINUTES
+  setInterval(() => {
+    channel.send("🟢 **JSR ALERT BOT STATUS:** ONLINE & MONITORING 🚀");
+  }, 30 * 60 * 1000);
+
+  // 🔁 MAIN LOOP
   setInterval(async () => {
     try {
       const players = await getPlayers();
@@ -137,8 +146,4 @@ client.once("ready", async () => {
   }, INTERVAL);
 });
 
-client.login(TOKEN);setInterval(() => {
-  channel.send("✅ BOT STILL ONLINE 🔥");
-}, 30 * 60 * 1000); // 30 minutessetInterval(() => {
-  channel.send("🟢 **JSR ALERT BOT STATUS:** ONLINE & MONITORING 🚀");
-}, 30 * 60 * 1000);
+client.login(TOKEN);
