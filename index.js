@@ -1,6 +1,5 @@
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import * as cheerio from "cheerio";
-import fetch from "node-fetch";
 
 // Crash protection
 process.on("unhandledRejection", (reason) => {
@@ -10,11 +9,9 @@ process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
 });
 
-// ENV
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 
-// SETTINGS
 const URL = "https://ntl-slither.com/ss/";
 const INTERVAL = 60000;
 const TARGET_SERVER_ID = "8828";
@@ -22,16 +19,13 @@ const TARGET_REGION = "IN";
 const JSR_THRESHOLD = 20000;
 const JSR_ROLE_ID = "1456546757893947598";
 
-// MEMORY
 const seen = new Set();
 const jsrDone = new Set();
 
-// JSR detection
 function isJSR(name) {
   return name.includes("JSR");
 }
 
-// Fetch leaderboard
 async function getPlayers() {
   const res = await fetch(URL);
   const html = await res.text();
@@ -63,24 +57,18 @@ async function getPlayers() {
   return players;
 }
 
-// EMBEDS
 function killEmbed(p) {
   return new EmbedBuilder()
     .setColor(0xff0000)
-    .setDescription(
-      `🚨 **TARGET SPOTTED** 🚨\n🐍 ${p.name}\n📏 ${p.score}\n⚔️ KILL NOW!`
-    );
+    .setDescription(`🚨 **TARGET SPOTTED** 🚨\n🐍 ${p.name}\n📏 ${p.score}\n⚔️ KILL NOW!`);
 }
 
 function helpEmbed(p) {
   return new EmbedBuilder()
     .setColor(0x00ff99)
-    .setDescription(
-      `🛡️ **JSR NEEDS HELP** 🛡️\n🐍 ${p.name}\n📏 ${p.score}\n🤝 PROTECT NOW!`
-    );
+    .setDescription(`🛡️ **JSR NEEDS HELP** 🛡️\n🐍 ${p.name}\n📏 ${p.score}\n🤝 PROTECT NOW!`);
 }
 
-// BOT
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
@@ -88,26 +76,24 @@ const client = new Client({
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID).catch(err => {
-    console.error("Channel fetch failed:", err);
-  });
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
 
   if (!channel) {
-    console.log("❌ Channel not found! Check CHANNEL ID");
+    console.log("❌ Channel not found — check ID");
     return;
   }
 
-  console.log("✅ Channel fetched successfully");
+  console.log("✅ Channel OK");
 
-  // 🔥 SEND ON START
-  await channel.send("🟢 **JSR ALERT BOT STARTED & ONLINE 🚀**");
+  // send once on start
+  await channel.send("🟢 BOT ONLINE 🚀");
 
-  // 🔁 EVERY 30 MIN
+  // every 30 min
   setInterval(() => {
-    channel.send("🟢 **JSR ALERT BOT STATUS:** ONLINE & MONITORING 🚀");
+    channel.send("🟢 BOT STILL ONLINE 🚀");
   }, 30 * 60 * 1000);
 
-  // 🔁 MAIN LOOP
+  // main loop
   setInterval(async () => {
     try {
       console.log("Checking leaderboard...");
@@ -134,13 +120,21 @@ client.once("ready", async () => {
         }
 
         if (p.score >= 60000 && !isJSR(p.name)) {
-          await channel.send(
-            `🚨🚨 ULTRA TARGET 🚨🚨\n${p.name} (${p.score}) — ALL ATTACK 💀`
-          );
+          await channel.send(`🚨 ULTRA TARGET 🚨 ${p.name} (${p.score})`);
         }
       }
 
       for (const name of seen) {
         if (!current.has(name)) {
           seen.delete(name);
-          jsrDone
+          jsrDone.delete(name);
+        }
+      }
+
+    } catch (err) {
+      console.error("Loop Error:", err);
+    }
+  }, INTERVAL);
+});
+
+client.login(TOKEN);
