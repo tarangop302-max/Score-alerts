@@ -137,4 +137,6 @@ client.once("ready", async () => {
   }, INTERVAL);
 });
 
-client.login(TOKEN);
+client.login(TOKEN);setInterval(() => {
+  channel.send("✅ BOT STILL ONLINE 🔥");
+}, 30 * 60 * 1000); // 30 minutes
