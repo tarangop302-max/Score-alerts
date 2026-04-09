@@ -118,3 +118,23 @@ client.once("ready", async () => {
           });
           jsrDone.add(p.name);
         }
+
+        if (p.score >= 60000 && !isJSR(p.name)) {
+          await channel.send(`🚨 ULTRA TARGET 🚨 ${p.name} (${p.score})`);
+        }
+      }
+
+      for (const name of seen) {
+        if (!current.has(name)) {
+          seen.delete(name);
+          jsrDone.delete(name);
+        }
+      }
+
+    } catch (err) {
+      console.error("Loop Error:", err);
+    }
+  }, INTERVAL);
+});
+
+client.login(TOKEN);
