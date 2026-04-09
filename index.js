@@ -1,68 +1,58 @@
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 import fetch from "node-fetch";
 
+// Crash protection
 process.on("unhandledRejection", (reason) => {
-  console.error("[UNHANDLED REJECTION]:", reason);
+  console.error("Unhandled Rejection:", reason);
 });
-
 process.on("uncaughtException", (err) => {
-  console.error("[UNCAUGHT EXCEPTION]:", err.message);
+  console.error("Uncaught Exception:", err);
 });
 
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
+// ENV
+const TOKEN = process.env.DISCORD_BOT_TOKEN;
+const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 
-const NTL_URL = "https://ntl-slither.com/ss/";
-const POLL_INTERVAL_MS = 60000;
+// SETTINGS
+const URL = "https://ntl-slither.com/ss/";
+const INTERVAL = 60000;
 const TARGET_SERVER_ID = "8828";
-const TARGET_SERVER_REGION = "IN";
-const JSR_SCORE_THRESHOLD = 20000;
+const TARGET_REGION = "IN";
+const JSR_THRESHOLD = 20000;
 const JSR_ROLE_ID = "1456546757893947598";
 
-const playersOnLeaderboard = new Set();
-const jsrAlerted = new Set();
+// MEMORY
+const seen = new Set();
+const jsrDone = new Set();
 
-function isJsrPlayer(name) {
-  const tags = [
-    "{ J S R }", "{ JSR }", "{J S R}", "{JSR}",
-    "( J S R )", "( JSR )", "(J S R)", "(JSR)",
-  ];
-  return tags.some((tag) => name.includes(tag));
+// JSR detection
+function isJSR(name) {
+  return name.includes("JSR");
 }
 
-async function fetchLeaderboard() {
-  const res = await fetch(NTL_URL);
+// Fetch leaderboard
+async function getPlayers() {
+  const res = await fetch(URL);
   const html = await res.text();
   const $ = cheerio.load(html);
 
   const players = [];
 
-  $("table").each((_i, table) => {
+  $("table").each((_, table) => {
     const rows = $(table).find("tr");
 
-    let serverName = "";
-    let serverId = "";
+    let header = rows.first().text().trim();
+    let idMatch = header.match(/^(\d+)/);
+    let serverId = idMatch ? idMatch[1] : "";
 
-    const header = rows.first().text().trim();
-    if (header) {
-      serverName = header;
-      const match = header.match(/^(\d+)/);
-      if (match) serverId = match[1];
-    }
+    if (!header.includes(`- ${TARGET_REGION}`) || serverId !== TARGET_SERVER_ID) return;
 
-    const isTarget =
-      serverId === TARGET_SERVER_ID &&
-      serverName.includes(`- ${TARGET_SERVER_REGION}`);
-
-    if (!isTarget) return;
-
-    rows.each((_j, row) => {
+    rows.each((_, row) => {
       const cells = $(row).find("td");
       if (cells.length === 3) {
         const name = $(cells[1]).text().trim();
         const score = parseInt($(cells[2]).text().replace(/,/g, ""), 10);
-
         if (!isNaN(score)) {
           players.push({ name, score });
         }
@@ -73,22 +63,24 @@ async function fetchLeaderboard() {
   return players;
 }
 
-function buildKillEmbed(player) {
+// EMBEDS
+function killEmbed(p) {
   return new EmbedBuilder()
     .setColor(0xff0000)
     .setDescription(
-      `🚨 **TARGET SPOTTED** 🚨\n🐍 ${player.name}\n📏 ${player.score}\n⚔️ **KILL NOW!**`
+      `🚨 **TARGET SPOTTED** 🚨\n🐍 ${p.name}\n📏 ${p.score}\n⚔️ KILL NOW!`
     );
 }
 
-function buildHelpEmbed(player) {
+function helpEmbed(p) {
   return new EmbedBuilder()
     .setColor(0x00ff99)
     .setDescription(
-      `🛡️ **JSR NEEDS HELP** 🛡️\n🐍 ${player.name}\n📏 ${player.score}\n🤝 PROTECT NOW!`
+      `🛡️ **JSR NEEDS HELP** 🛡️\n🐍 ${p.name}\n📏 ${p.score}\n🤝 PROTECT NOW!`
     );
 }
 
+// BOT
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
@@ -96,59 +88,53 @@ const client = new Client({
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
+  const channel = await client.channels.fetch(CHANNEL_ID);
 
   setInterval(async () => {
     try {
-      const players = await fetchLeaderboard();
+      const players = await getPlayers();
       const current = new Set();
 
-      for (const player of players) {
-        current.add(player.name);
+      for (const p of players) {
+        current.add(p.name);
 
-        // 🔴 Kill alert
-        if (!playersOnLeaderboard.has(player.name)) {
-          playersOnLeaderboard.add(player.name);
-
-          if (!isJsrPlayer(player.name)) {
-            await channel.send({ embeds: [buildKillEmbed(player)] });
+        // 🔴 KILL ALERT
+        if (!seen.has(p.name)) {
+          seen.add(p.name);
+          if (!isJSR(p.name)) {
+            await channel.send({ embeds: [killEmbed(p)] });
           }
         }
 
-        // 🟢 JSR Help alert
-        if (
-          isJsrPlayer(player.name) &&
-          player.score >= JSR_SCORE_THRESHOLD &&
-          !jsrAlerted.has(player.name)
-        ) {
+        // 🟢 HELP ALERT
+        if (isJSR(p.name) && p.score >= JSR_THRESHOLD && !jsrDone.has(p.name)) {
           await channel.send({
-            content: `<@&${JSR_ROLE_ID}> HELP NEEDED!`,
-            embeds: [buildHelpEmbed(player)],
+            content: `<@&${JSR_ROLE_ID}> HELP NOW!`,
+            embeds: [helpEmbed(p)],
           });
-
-          jsrAlerted.add(player.name);
+          jsrDone.add(p.name);
         }
 
-        // 💀 ULTRA ALERT (60k+)
-        if (player.score >= 60000 && !isJsrPlayer(player.name)) {
+        // 💀 ULTRA ALERT
+        if (p.score >= 60000 && !isJSR(p.name)) {
           await channel.send(
-            `🚨🚨 **ULTRA TARGET** 🚨🚨\n${player.name} (${player.score}) — ALL ATTACK 💀`
+            `🚨🚨 ULTRA TARGET 🚨🚨\n${p.name} (${p.score}) — ALL ATTACK 💀`
           );
         }
       }
 
       // cleanup
-      for (const name of playersOnLeaderboard) {
+      for (const name of seen) {
         if (!current.has(name)) {
-          playersOnLeaderboard.delete(name);
-          jsrAlerted.delete(name);
+          seen.delete(name);
+          jsrDone.delete(name);
         }
       }
 
     } catch (err) {
-      console.error("Error:", err);
+      console.error("Loop Error:", err);
     }
-  }, POLL_INTERVAL_MS);
+  }, INTERVAL);
 });
 
-client.login(DISCORD_BOT_TOKEN);
+client.login(TOKEN);
