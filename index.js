@@ -1,5 +1,5 @@
-import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
-import * as cheerio from "cheerio";
+const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+const cheerio = require("cheerio");
 
 // Crash protection
 process.on("unhandledRejection", (reason) => {
@@ -60,13 +60,13 @@ async function getPlayers() {
 function killEmbed(p) {
   return new EmbedBuilder()
     .setColor(0xff0000)
-    .setDescription(`🚨 **TARGET SPOTTED** 🚨\n🐍 ${p.name}\n📏 ${p.score}\n⚔️ KILL NOW!`);
+    .setDescription(`🚨 TARGET SPOTTED 🚨\n🐍 ${p.name}\n📏 ${p.score}\n⚔️ KILL NOW!`);
 }
 
 function helpEmbed(p) {
   return new EmbedBuilder()
     .setColor(0x00ff99)
-    .setDescription(`🛡️ **JSR NEEDS HELP** 🛡️\n🐍 ${p.name}\n📏 ${p.score}\n🤝 PROTECT NOW!`);
+    .setDescription(`🛡️ JSR NEEDS HELP 🛡️\n🐍 ${p.name}\n📏 ${p.score}\n🤝 PROTECT NOW!`);
 }
 
 const client = new Client({
@@ -79,21 +79,21 @@ client.once("ready", async () => {
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
 
   if (!channel) {
-    console.log("❌ Channel not found — check ID");
+    console.log("❌ Channel not found");
     return;
   }
 
   console.log("✅ Channel OK");
 
-  // send once on start
+  // START MESSAGE
   await channel.send("🟢 BOT ONLINE 🚀");
 
-  // every 30 min
+  // EVERY 30 MIN
   setInterval(() => {
     channel.send("🟢 BOT STILL ONLINE 🚀");
   }, 30 * 60 * 1000);
 
-  // main loop
+  // MAIN LOOP
   setInterval(async () => {
     try {
       console.log("Checking leaderboard...");
@@ -118,23 +118,3 @@ client.once("ready", async () => {
           });
           jsrDone.add(p.name);
         }
-
-        if (p.score >= 60000 && !isJSR(p.name)) {
-          await channel.send(`🚨 ULTRA TARGET 🚨 ${p.name} (${p.score})`);
-        }
-      }
-
-      for (const name of seen) {
-        if (!current.has(name)) {
-          seen.delete(name);
-          jsrDone.delete(name);
-        }
-      }
-
-    } catch (err) {
-      console.error("Loop Error:", err);
-    }
-  }, INTERVAL);
-});
-
-client.login(TOKEN);
