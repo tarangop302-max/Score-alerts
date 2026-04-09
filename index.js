@@ -76,53 +76,57 @@ function helpEmbed(p) {
 // Discord client
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-client.once("ready", async () => {
+client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Fetch channel safely
-  let channel;
-  try {
-    channel = await client.channels.fetch(CHANNEL_ID);
-    if (!channel) throw new Error("Channel not found or bot has no access");
-    await channel.send("🟢 BOT ONLINE 🚀");
-    console.log("✅ Start message sent");
-  } catch (err) {
-    console.error("Failed to fetch channel:", err.message);
-    return;
-  }
-
-  // Main loop
-  setInterval(async () => {
+  // Delay channel fetch to avoid Railway crash
+  setTimeout(async () => {
+    let channel;
     try {
-      const players = await getPlayers();
-      for (const p of players) {
-        const { name, score } = p;
+      channel = await client.channels.fetch(CHANNEL_ID);
+      if (!channel) throw new Error("Channel not found or bot has no access");
+      await channel.send("🟢 BOT ONLINE 🚀");
+      console.log("✅ Start message sent");
+    } catch (err) {
+      console.error("❌ Channel fetch failed:", err.message);
+      return;
+    }
 
-        // JSR players
-        if (isJSR(name)) {
-          if (score >= 20000 && !jsr20.has(name)) {
-            await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
-            jsr20.add(name);
-          } else if (score >= 50000 && !jsr50.has(name)) {
-            await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
-            jsr50.add(name);
-          }
-        } 
-        // Non-JSR players
-        else {
-          if (score >= 30000 && !alerted30.has(name)) {
-            await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 30k!`).catch(console.error);
-            alerted30.add(name);
-          } else if (score >= 80000 && !alerted80.has(name)) {
-            await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 80k!`).catch(console.error);
-            alerted80.add(name);
+    // Main loop
+    setInterval(async () => {
+      try {
+        const players = await getPlayers();
+
+        for (const p of players) {
+          const { name, score } = p;
+
+          // JSR players
+          if (isJSR(name)) {
+            if (score >= 20000 && !jsr20.has(name)) {
+              await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
+              jsr20.add(name);
+            } else if (score >= 50000 && !jsr50.has(name)) {
+              await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
+              jsr50.add(name);
+            }
+          } 
+          // Non-JSR players
+          else {
+            if (score >= 30000 && !alerted30.has(name)) {
+              await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 30k!`).catch(console.error);
+              alerted30.add(name);
+            } else if (score >= 80000 && !alerted80.has(name)) {
+              await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 80k!`).catch(console.error);
+              alerted80.add(name);
+            }
           }
         }
+      } catch (err) {
+        console.error("Error in main loop:", err.message);
       }
-    } catch (err) {
-      console.error("Error in main loop:", err.message);
-    }
-  }, INTERVAL);
+    }, INTERVAL);
+
+  }, 5000); // 5-second delay
 });
 
 // Login
