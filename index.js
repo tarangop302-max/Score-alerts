@@ -55,9 +55,7 @@ async function getPlayers() {
         if (cells.length === 3) {
           const name = $(cells[1]).text().trim();
           const score = Number($(cells[2]).text().replace(/,/g, ""));
-          if (!isNaN(score)) {
-            players.push({ name, score });
-          }
+          if (!isNaN(score)) players.push({ name, score });
         }
       });
     });
@@ -122,12 +120,3 @@ client.once("ready", async () => {
           await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 80k!`).catch(console.error);
           alerted80.add(name);
         }
-      }
-    }
-  }, INTERVAL);
-});
-
-// 🚀 Login
-client.login(TOKEN).catch(err => {
-  console.error("❌ Failed to login:", err.message);
-});
