@@ -80,9 +80,17 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+  // 🚨 Safe channel fetch
+  let channel;
+  try {
+    channel = await client.channels.fetch(CHANNEL_ID);
+  } catch (err) {
+    console.error("❌ Failed to fetch channel:", err.message);
+    return;
+  }
+
   if (!channel) {
-    console.error("❌ Channel not found");
+    console.error("❌ Channel not found or bot has no access");
     return;
   }
 
@@ -96,27 +104,41 @@ client.once("ready", async () => {
 
   // 🔁 Main loop
   setInterval(async () => {
-    const players = await getPlayers();
+    try {
+      const players = await getPlayers();
 
-    for (const p of players) {
-      const { name, score } = p;
+      for (const p of players) {
+        const { name, score } = p;
 
-      // JSR players
-      if (isJSR(name)) {
-        if (score >= 20000 && !jsr20.has(name)) {
-          await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
-          jsr20.add(name);
-        } else if (score >= 50000 && !jsr50.has(name)) {
-          await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
-          jsr50.add(name);
+        // JSR players
+        if (isJSR(name)) {
+          if (score >= 20000 && !jsr20.has(name)) {
+            await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
+            jsr20.add(name);
+          } else if (score >= 50000 && !jsr50.has(name)) {
+            await channel.send({ embeds: [helpEmbed(p)] }).catch(console.error);
+            jsr50.add(name);
+          }
+        } 
+        // Non-JSR players
+        else {
+          if (score >= 30000 && !alerted30.has(name)) {
+            await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 30k!`).catch(console.error);
+            alerted30.add(name);
+          } else if (score >= 80000 && !alerted80.has(name)) {
+            await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 80k!`).catch(console.error);
+            alerted80.add(name);
+          }
         }
-      } 
-      // Non-JSR players
-      else {
-        if (score >= 30000 && !alerted30.has(name)) {
-          await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 30k!`).catch(console.error);
-          alerted30.add(name);
-        } else if (score >= 80000 && !alerted80.has(name)) {
-          await channel.send(`⚔️ KILL ALERT ⚔️\n🐍 ${name} reached 80k!`).catch(console.error);
-          alerted80.add(name);
-        }
+      }
+
+    } catch (err) {
+      console.error("❌ Error in leaderboard loop:", err.message);
+    }
+  }, INTERVAL);
+});
+
+// 🚀 Login
+client.login(TOKEN).catch(err => {
+  console.error("❌ Failed to login:", err.message);
+});
