@@ -1,40 +1,43 @@
-import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
-import fetch from "node-fetch";
-import cheerio from "cheerio";
+// =====================
+// SLITHER ALERT BOT
+// =====================
+
+const { Client, GatewayIntentBits, MessageEmbed } = require("discord.js");
+const fetch = require("node-fetch");
+const cheerio = require("cheerio");
 
 // Crash protection
-process.on("unhandledRejection", (err) => console.error("Unhandled Rejection:", err));
-process.on("uncaughtException", (err) => console.error("Uncaught Exception:", err));
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);
 
-// Runtime environment variables
+// ======== ENVIRONMENT VARIABLES ========
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const JSR_ROLE_ID = process.env.JSR_ROLE_ID;
 
 if (!TOKEN || !CHANNEL_ID || !JSR_ROLE_ID) {
-  console.error("❌ Missing environment variables! Make sure DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, and JSR_ROLE_ID are set.");
+  console.error("❌ Missing environment variables! Set DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, JSR_ROLE_ID");
   process.exit(1);
 }
 
-// Leaderboard settings
+// ======== SETTINGS ========
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 60000; // 1 minute
+const INTERVAL = 60 * 1000; // 1 minute
 const TARGET_SERVER_ID = "8828";
 const TARGET_REGION = "IN";
 
-// Trackers
+// ======== TRACKERS ========
 const alerted30 = new Set();
 const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
-// Detect JSR players
+// ======== HELPER FUNCTIONS ========
 function isJSR(name) {
   const tags = ["JSR","{JSR}","{ JSR }","{ J S R }","(JSR)","( JSR )","( J S R )"];
   return tags.some(tag => name.includes(tag));
 }
 
-// Fetch leaderboard
 async function getPlayers(retries = 3) {
   try {
     const res = await fetch(URL);
@@ -72,14 +75,13 @@ async function getPlayers(retries = 3) {
   }
 }
 
-// Embed for JSR alerts
 function helpEmbed(p) {
-  return new EmbedBuilder()
-    .setColor(0x00ff99)
+  return new MessageEmbed()
+    .setColor("#00ff99")
     .setDescription(`🛡️ JSR NEEDS HELP 🛡️\n🐍 ${p.name}\n📏 ${p.score}`);
 }
 
-// Discord client
+// ======== DISCORD CLIENT ========
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once("ready", async () => {
@@ -134,4 +136,4 @@ client.once("ready", async () => {
   }, INTERVAL);
 });
 
-client.login(TOKEN).catch(err => console.error("Failed to login:", err));
+client.login(TOKEN).catch(err => console.error("Failed to login:", err));,
