@@ -139,4 +139,6 @@ client.once("ready", async () => {
 
 client.login(TOKEN);setInterval(() => {
   channel.send("✅ BOT STILL ONLINE 🔥");
-}, 30 * 60 * 1000); // 30 minutes
+}, 30 * 60 * 1000); // 30 minutessetInterval(() => {
+  channel.send("🟢 **JSR ALERT BOT STATUS:** ONLINE & MONITORING 🚀");
+}, 30 * 60 * 1000);
