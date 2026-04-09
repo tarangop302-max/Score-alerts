@@ -88,12 +88,21 @@ const client = new Client({
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID);
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(err => {
+    console.error("Channel fetch failed:", err);
+  });
+
+  if (!channel) {
+    console.log("❌ Channel not found! Check CHANNEL ID");
+    return;
+  }
+
+  console.log("✅ Channel fetched successfully");
 
   // 🔥 SEND ON START
   await channel.send("🟢 **JSR ALERT BOT STARTED & ONLINE 🚀**");
 
-  // 🔁 SEND EVERY 30 MINUTES
+  // 🔁 EVERY 30 MIN
   setInterval(() => {
     channel.send("🟢 **JSR ALERT BOT STATUS:** ONLINE & MONITORING 🚀");
   }, 30 * 60 * 1000);
@@ -101,13 +110,14 @@ client.once("ready", async () => {
   // 🔁 MAIN LOOP
   setInterval(async () => {
     try {
+      console.log("Checking leaderboard...");
+
       const players = await getPlayers();
       const current = new Set();
 
       for (const p of players) {
         current.add(p.name);
 
-        // 🔴 KILL ALERT
         if (!seen.has(p.name)) {
           seen.add(p.name);
           if (!isJSR(p.name)) {
@@ -115,7 +125,6 @@ client.once("ready", async () => {
           }
         }
 
-        // 🟢 HELP ALERT
         if (isJSR(p.name) && p.score >= JSR_THRESHOLD && !jsrDone.has(p.name)) {
           await channel.send({
             content: `<@&${JSR_ROLE_ID}> HELP NOW!`,
@@ -124,7 +133,6 @@ client.once("ready", async () => {
           jsrDone.add(p.name);
         }
 
-        // 💀 ULTRA ALERT
         if (p.score >= 60000 && !isJSR(p.name)) {
           await channel.send(
             `🚨🚨 ULTRA TARGET 🚨🚨\n${p.name} (${p.score}) — ALL ATTACK 💀`
@@ -132,18 +140,7 @@ client.once("ready", async () => {
         }
       }
 
-      // cleanup
       for (const name of seen) {
         if (!current.has(name)) {
           seen.delete(name);
-          jsrDone.delete(name);
-        }
-      }
-
-    } catch (err) {
-      console.error("Loop Error:", err);
-    }
-  }, INTERVAL);
-});
-
-client.login(TOKEN);
+          jsrDone
