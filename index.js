@@ -12,16 +12,25 @@ const URL = "https://ntl-slither.com/ss/";
 const INTERVAL = 60000;
 const TARGET_SERVER_ID = "8828";
 const TARGET_REGION = "IN";
-const JSR_THRESHOLD = 20000;
 const JSR_ROLE_ID = "1456546757893947598";
 
-const seen = new Set();
-const jsrDone = new Set();
+// 🔥 TRACKERS
+const alerted30 = new Set();
+const alerted80 = new Set();
+const jsr20 = new Set();
+const jsr50 = new Set();
 
+// JSR detection (supports all formats)
 function isJSR(name) {
-  return name.includes("JSR");
+  const tags = [
+    "JSR",
+    "{JSR}", "{ JSR }", "{ J S R }",
+    "(JSR)", "( JSR )", "( J S R )"
+  ];
+  return tags.some(tag => name.includes(tag));
 }
 
+// Fetch leaderboard
 async function getPlayers() {
   const res = await fetch(URL);
   const html = await res.text();
@@ -53,16 +62,11 @@ async function getPlayers() {
   return players;
 }
 
-function killEmbed(p) {
-  return new EmbedBuilder()
-    .setColor(0xff0000)
-    .setDescription(`🚨 TARGET SPOTTED 🚨\n🐍 ${p.name}\n📏 ${p.score}\n⚔️ KILL NOW!`);
-}
-
+// EMBEDS
 function helpEmbed(p) {
   return new EmbedBuilder()
     .setColor(0x00ff99)
-    .setDescription(`🛡️ JSR NEEDS HELP 🛡️\n🐍 ${p.name}\n📏 ${p.score}\n🤝 PROTECT NOW!`);
+    .setDescription(`🛡️ JSR NEEDS HELP 🛡️\n🐍 ${p.name}\n📏 ${p.score}`);
 }
 
 const client = new Client({
@@ -81,7 +85,7 @@ client.once("ready", async () => {
 
   console.log("✅ Channel OK");
 
-  // 🔥 FORCE SEND START MESSAGE
+  // START MESSAGE
   try {
     await channel.send("🟢 BOT ONLINE 🚀");
     console.log("✅ Start message sent");
@@ -89,55 +93,4 @@ client.once("ready", async () => {
     console.error("❌ Send failed:", err.message);
   }
 
-  // 🔁 EVERY 30 MIN
-  setInterval(async () => {
-    try {
-      await channel.send("🟢 BOT STILL ONLINE 🚀");
-    } catch {}
-  }, 30 * 60 * 1000);
-
-  // 🔁 MAIN LOOP
-  setInterval(async () => {
-    try {
-      console.log("Checking leaderboard...");
-
-      const players = await getPlayers();
-      const current = new Set();
-
-      for (const p of players) {
-        current.add(p.name);
-
-        if (!seen.has(p.name)) {
-          seen.add(p.name);
-          if (!isJSR(p.name)) {
-            await channel.send({ embeds: [killEmbed(p)] });
-          }
-        }
-
-        if (isJSR(p.name) && p.score >= JSR_THRESHOLD && !jsrDone.has(p.name)) {
-          await channel.send({
-            content: `<@&${JSR_ROLE_ID}> HELP NOW!`,
-            embeds: [helpEmbed(p)],
-          });
-          jsrDone.add(p.name);
-        }
-
-        if (p.score >= 60000 && !isJSR(p.name)) {
-          await channel.send(`🚨 ULTRA TARGET 🚨 ${p.name} (${p.score})`);
-        }
-      }
-
-      for (const name of seen) {
-        if (!current.has(name)) {
-          seen.delete(name);
-          jsrDone.delete(name);
-        }
-      }
-
-    } catch (err) {
-      console.error("Loop Error:", err);
-    }
-  }, INTERVAL);
-});
-
-client.login(TOKEN);
+  // EVERY 30 MIN
