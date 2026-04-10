@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
 
-// 🛡️ GLOBAL PROTECTION
+// 🛡️ crash protection
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
@@ -22,14 +22,12 @@ const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
-let lastTopPlayer = null;
-
 // 🔍 detect JSR
 function isJSR(name) {
   return name.includes("JSR");
 }
 
-// 🌐 SAFE FETCH
+// 🌐 fetch
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -40,7 +38,7 @@ function fetchHTML(url) {
   });
 }
 
-// 🧠 RAW PARSER (8828 ONLY)
+// 🧠 parse ONLY 8828
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -78,18 +76,15 @@ client.once("ready", async () => {
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return console.log("Channel not found");
 
-  try {
-    await channel.send("🟢 **BOT ONLINE 🚀**");
-  } catch {}
+  await channel.send("🟢 **JSR ALERT BOT ONLINE 🚀**").catch(() => {});
 
-  // 🟢 heartbeat
+  // heartbeat
   setInterval(() => {
     channel.send("🟢 **BOT STILL ONLINE 🚀**").catch(() => {});
   }, 30 * 60 * 1000);
 
-  // 🔥 MAIN LOOP
+  // main loop
   setInterval(async () => {
-    console.log("Checking leaderboard...");
 
     let html;
     try {
@@ -107,60 +102,36 @@ client.once("ready", async () => {
       return;
     }
 
-    // 👑 KING DETECTOR
-    let currentTop = null;
-    for (const p of players) {
-      if (!currentTop || p.score > currentTop.score) {
-        currentTop = p;
-      }
-    }
-
-    if (currentTop && currentTop.name !== lastTopPlayer) {
-      lastTopPlayer = currentTop.name;
-
-      const embed = {
-        color: 0xffd700,
-        title: "👑 NEW KING ON SERVER 8828 👑",
-        description:
-          `🐍 **Player:** ${currentTop.name}\n` +
-          `📏 **Length:** ${currentTop.score.toLocaleString()}\n\n` +
-          `💀 **ALL PLAYERS — BE READY**\n⚔️ **TAKE THE KING DOWN!**`,
-        footer: { text: "⚡ JSR Alert System" },
-        timestamp: new Date(),
-      };
-
-      await channel.send({ embeds: [embed] }).catch(() => {});
-    }
-
-    // ⚔️ ALERT SYSTEM
     for (const p of players) {
       try {
 
-        // 🔴 NON-JSR
+        // 🔴 RANDOM PLAYERS
         if (!isJSR(p.name)) {
 
+          // 30K
           if (p.score >= 30000 && !alerted30.has(p.name)) {
             const embed = {
               color: 0xff0000,
-              title: "🚨 KILL TARGET 🚨",
+              title: "🚨 TARGET LOCKED 🚨",
               description:
-                `🐍 **Player:** ${p.name}\n` +
-                `📏 **Length:** ${p.score.toLocaleString()}\n\n` +
-                `⚔️ **ATTACK IMMEDIATELY!**`,
+                `🐍 **${p.name}**\n` +
+                `📏 **${p.score.toLocaleString()} length**\n\n` +
+                `⚔️ **HUNT. SURROUND. DESTROY.**`,
               timestamp: new Date(),
             };
             await channel.send({ embeds: [embed] });
             alerted30.add(p.name);
           }
 
+          // 80K
           if (p.score >= 80000 && !alerted80.has(p.name)) {
             const embed = {
               color: 0x8b0000,
-              title: "💀 ULTRA TARGET 💀",
+              title: "💀 EXTREME THREAT 💀",
               description:
-                `🐍 **Player:** ${p.name}\n` +
-                `📏 **Length:** ${p.score.toLocaleString()}\n\n` +
-                `🔥 **EXTREME THREAT — DESTROY NOW!**`,
+                `🐍 **${p.name}**\n` +
+                `📏 **${p.score.toLocaleString()} length**\n\n` +
+                `🔥 **ALL PLAYERS ATTACK NOW — NO MERCY**`,
               timestamp: new Date(),
             };
             await channel.send({ embeds: [embed] });
@@ -169,17 +140,18 @@ client.once("ready", async () => {
 
         }
 
-        // 🟢 JSR
+        // 🟢 JSR PLAYERS
         else {
 
+          // 20K
           if (p.score >= 20000 && !jsr20.has(p.name)) {
             const embed = {
               color: 0x00ff99,
-              title: "🛡️ JSR MEMBER NEEDS HELP 🛡️",
+              title: "🛡️ JSR NEEDS SUPPORT 🛡️",
               description:
-                `🐍 **Player:** ${p.name}\n` +
-                `📏 **Length:** ${p.score.toLocaleString()}\n\n` +
-                `🤝 **PROTECT & SUPPORT!**`,
+                `🐍 **${p.name}**\n` +
+                `📏 **${p.score.toLocaleString()} length**\n\n` +
+                `🤝 **PROTECT. FEED. DEFEND.**`,
               timestamp: new Date(),
             };
             await channel.send({
@@ -189,14 +161,15 @@ client.once("ready", async () => {
             jsr20.add(p.name);
           }
 
+          // 50K
           if (p.score >= 50000 && !jsr50.has(p.name)) {
             const embed = {
               color: 0x00cc66,
-              title: "🚨 URGENT JSR HELP 🚨",
+              title: "🚨 JSR CRITICAL ALERT 🚨",
               description:
-                `🐍 **Player:** ${p.name}\n` +
-                `📏 **Length:** ${p.score.toLocaleString()}\n\n` +
-                `⚡ **ALL MEMBERS ASSIST NOW!**`,
+                `🐍 **${p.name}**\n` +
+                `📏 **${p.score.toLocaleString()} length**\n\n` +
+                `⚡ **ALL MEMBERS — IMMEDIATE ASSIST REQUIRED**`,
               timestamp: new Date(),
             };
             await channel.send({
