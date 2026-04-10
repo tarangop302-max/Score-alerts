@@ -1,6 +1,5 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const cheerio = require("cheerio");
-const fetch = require("node-fetch");
 
 // crash protection
 process.on("unhandledRejection", console.error);
@@ -21,13 +20,13 @@ const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
-// detect JSR (all formats)
+// detect JSR
 function isJSR(name) {
   const tags = ["JSR", "{JSR}", "{ JSR }", "{ J S R }", "(JSR)", "( JSR )", "( J S R )"];
   return tags.some(tag => name.includes(tag));
 }
 
-// fetch leaderboard
+// fetch leaderboard (USES BUILT-IN FETCH ✅)
 async function getPlayers() {
   const res = await fetch(URL);
   const html = await res.text();
@@ -80,12 +79,7 @@ client.once("ready", async () => {
   console.log("✅ Channel OK");
 
   // start message
-  try {
-    await channel.send("🟢 BOT ONLINE 🚀");
-    console.log("✅ Start message sent");
-  } catch (err) {
-    console.error("❌ Send failed:", err.message);
-  }
+  await channel.send("🟢 BOT ONLINE 🚀").catch(console.error);
 
   // every 30 min
   setInterval(() => {
@@ -105,12 +99,12 @@ client.once("ready", async () => {
         if (!isJSR(p.name)) {
 
           if (p.score >= 30000 && !alerted30.has(p.name)) {
-            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score}) — ATTACK NOW ⚔️`);
+            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score})`);
             alerted30.add(p.name);
           }
 
           if (p.score >= 80000 && !alerted80.has(p.name)) {
-            await channel.send(`💀 ULTRA TARGET 💀\n${p.name} (${p.score}) — ALL ATTACK 🔥`);
+            await channel.send(`💀 ULTRA TARGET 💀\n${p.name} (${p.score})`);
             alerted80.add(p.name);
           }
 
@@ -129,7 +123,7 @@ client.once("ready", async () => {
 
           if (p.score >= 50000 && !jsr50.has(p.name)) {
             await channel.send({
-              content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP REQUIRED 🚨`,
+              content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP 🚨`,
               embeds: [helpEmbed(p)],
             });
             jsr50.add(p.name);
