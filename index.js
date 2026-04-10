@@ -12,15 +12,19 @@ const URL = "https://ntl-slither.com/ss/";
 const INTERVAL = 60000;
 const JSR_ROLE_ID = "1456546757893947598";
 
+// trackers
 const alerted30 = new Set();
 const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
+// detect JSR
 function isJSR(name) {
-  return name.includes("JSR");
+  const tags = ["JSR", "{JSR}", "{ JSR }", "{ J S R }", "(JSR)", "( JSR )", "( J S R )"];
+  return tags.some(tag => name.includes(tag));
 }
 
+// 🔥 FILTERED ONLY 8828 SERVER
 async function getPlayers() {
   const res = await fetch(URL);
   const html = await res.text();
@@ -28,16 +32,28 @@ async function getPlayers() {
 
   const players = [];
 
-  $("tr").each((i, row) => {
-    const cells = $(row).find("td");
-    if (cells.length === 3) {
-      const name = $(cells[1]).text().trim();
-      const score = parseInt($(cells[2]).text().replace(/,/g, ""), 10);
+  $("table").each((_, table) => {
+    const rows = $(table).find("tr");
 
-      if (!isNaN(score)) {
-        players.push({ name, score });
+    const header = rows.first().text().trim();
+    const idMatch = header.match(/^(\d+)/);
+    const serverId = idMatch ? idMatch[1] : "";
+
+    // ✅ ONLY SERVER 8828 (INDIA)
+    if (serverId !== "8828" || !header.includes("- IN")) return;
+
+    rows.each((_, row) => {
+      const cells = $(row).find("td");
+
+      if (cells.length === 3) {
+        const name = $(cells[1]).text().trim();
+        const score = parseInt($(cells[2]).text().replace(/,/g, ""), 10);
+
+        if (!isNaN(score)) {
+          players.push({ name, score });
+        }
       }
-    }
+    });
   });
 
   return players;
@@ -51,39 +67,45 @@ client.once("ready", async () => {
 
   await channel.send("🟢 BOT ONLINE 🚀").catch(() => {});
 
+  // every 30 min
   setInterval(() => {
     channel.send("🟢 BOT STILL ONLINE 🚀").catch(() => {});
   }, 30 * 60 * 1000);
 
+  // main loop
   setInterval(async () => {
     try {
-      console.log("Checking...");
+      console.log("Checking leaderboard...");
 
       const players = await getPlayers();
 
       for (const p of players) {
 
+        // 🔴 NON-JSR
         if (!isJSR(p.name)) {
 
           if (p.score >= 30000 && !alerted30.has(p.name)) {
-            await channel.send(`🚨 KILL TARGET: ${p.name} (${p.score})`);
+            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score})`);
             alerted30.add(p.name);
           }
 
           if (p.score >= 80000 && !alerted80.has(p.name)) {
-            await channel.send(`💀 ULTRA TARGET: ${p.name} (${p.score})`);
+            await channel.send(`💀 ULTRA TARGET 💀\n${p.name} (${p.score})`);
             alerted80.add(p.name);
           }
 
-        } else {
+        }
+
+        // 🟢 JSR
+        if (isJSR(p.name)) {
 
           if (p.score >= 20000 && !jsr20.has(p.name)) {
-            await channel.send(`<@&${JSR_ROLE_ID}> HELP ${p.name} (${p.score})`);
+            await channel.send(`<@&${JSR_ROLE_ID}> HELP NOW! ${p.name} (${p.score})`);
             jsr20.add(p.name);
           }
 
           if (p.score >= 50000 && !jsr50.has(p.name)) {
-            await channel.send(`<@&${JSR_ROLE_ID}> 🚨 URGENT ${p.name} (${p.score})`);
+            await channel.send(`<@&${JSR_ROLE_ID}> 🚨 URGENT HELP 🚨 ${p.name} (${p.score})`);
             jsr50.add(p.name);
           }
 
