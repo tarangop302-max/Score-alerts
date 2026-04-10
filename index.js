@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const cheerio = require("cheerio");
 
-// Crash protection
+// crash protection
 process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
 
@@ -14,23 +14,19 @@ const TARGET_SERVER_ID = "8828";
 const TARGET_REGION = "IN";
 const JSR_ROLE_ID = "1456546757893947598";
 
-// 🔥 TRACKERS
+// trackers
 const alerted30 = new Set();
 const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
-// JSR detection (supports all formats)
+// JSR detection
 function isJSR(name) {
-  const tags = [
-    "JSR",
-    "{JSR}", "{ JSR }", "{ J S R }",
-    "(JSR)", "( JSR )", "( J S R )"
-  ];
+  const tags = ["JSR", "{JSR}", "{ JSR }", "{ J S R }", "(JSR)", "( JSR )", "( J S R )"];
   return tags.some(tag => name.includes(tag));
 }
 
-// Fetch leaderboard
+// fetch leaderboard
 async function getPlayers() {
   const res = await fetch(URL);
   const html = await res.text();
@@ -41,9 +37,9 @@ async function getPlayers() {
   $("table").each((_, table) => {
     const rows = $(table).find("tr");
 
-    let header = rows.first().text().trim();
-    let idMatch = header.match(/^(\d+)/);
-    let serverId = idMatch ? idMatch[1] : "";
+    const header = rows.first().text().trim();
+    const idMatch = header.match(/^(\d+)/);
+    const serverId = idMatch ? idMatch[1] : "";
 
     if (!header.includes(`- ${TARGET_REGION}`) || serverId !== TARGET_SERVER_ID) return;
 
@@ -62,13 +58,14 @@ async function getPlayers() {
   return players;
 }
 
-// EMBEDS
+// embed
 function helpEmbed(p) {
   return new EmbedBuilder()
     .setColor(0x00ff99)
     .setDescription(`🛡️ JSR NEEDS HELP 🛡️\n🐍 ${p.name}\n📏 ${p.score}`);
 }
 
+// bot
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
@@ -77,30 +74,23 @@ client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-
-  if (!channel) {
-    console.log("❌ Channel not found");
-    return;
-  }
+  if (!channel) return console.log("❌ Channel not found");
 
   console.log("✅ Channel OK");
 
-  // START MESSAGE
+  // start msg
   try {
     await channel.send("🟢 BOT ONLINE 🚀");
-    console.log("✅ Start message sent");
   } catch (err) {
-    console.error("❌ Send failed:", err.message);
+    console.error("Send failed:", err.message);
   }
 
-  // EVERY 30 MIN
-  setInterval(async () => {
-    try {
-      await channel.send("🟢 BOT STILL ONLINE 🚀");
-    } catch {}
+  // 30 min ping
+  setInterval(() => {
+    channel.send("🟢 BOT STILL ONLINE 🚀").catch(() => {});
   }, 30 * 60 * 1000);
 
-  // 🔥 MAIN LOGIC
+  // main loop
   setInterval(async () => {
     try {
       console.log("Checking leaderboard...");
@@ -109,29 +99,24 @@ client.once("ready", async () => {
 
       for (const p of players) {
 
-        // 🔴 NON-JSR PLAYERS
-
+        // NON-JSR
         if (!isJSR(p.name)) {
 
-          // 30K ALERT
           if (p.score >= 30000 && !alerted30.has(p.name)) {
-            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score}) — ATTACK NOW ⚔️`);
+            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score})`);
             alerted30.add(p.name);
           }
 
-          // 80K ULTRA ALERT
           if (p.score >= 80000 && !alerted80.has(p.name)) {
-            await channel.send(`💀💀 ULTRA TARGET 💀💀\n${p.name} (${p.score}) — ALL ATTACK 🔥`);
+            await channel.send(`💀 ULTRA TARGET 💀\n${p.name} (${p.score})`);
             alerted80.add(p.name);
           }
 
         }
 
-        // 🟢 JSR PLAYERS
-
+        // JSR
         if (isJSR(p.name)) {
 
-          // 20K HELP
           if (p.score >= 20000 && !jsr20.has(p.name)) {
             await channel.send({
               content: `<@&${JSR_ROLE_ID}> HELP NOW!`,
@@ -140,10 +125,9 @@ client.once("ready", async () => {
             jsr20.add(p.name);
           }
 
-          // 50K URGENT HELP
           if (p.score >= 50000 && !jsr50.has(p.name)) {
             await channel.send({
-              content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP REQUIRED 🚨`,
+              content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP 🚨`,
               embeds: [helpEmbed(p)],
             });
             jsr50.add(p.name);
