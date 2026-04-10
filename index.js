@@ -1,139 +1,162 @@
-// =====================
-// SLITHER ALERT BOT
-// =====================
-
-const { Client, GatewayIntentBits, MessageEmbed } = require("discord.js");
-const fetch = require("node-fetch");
+const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const cheerio = require("cheerio");
 
 // Crash protection
 process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
 
-// ======== ENVIRONMENT VARIABLES ========
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
-const JSR_ROLE_ID = process.env.JSR_ROLE_ID;
 
-if (!TOKEN || !CHANNEL_ID || !JSR_ROLE_ID) {
-  console.error("❌ Missing environment variables! Set DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, JSR_ROLE_ID");
-  process.exit(1);
-}
-
-// ======== SETTINGS ========
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 60 * 1000; // 1 minute
+const INTERVAL = 60000;
 const TARGET_SERVER_ID = "8828";
 const TARGET_REGION = "IN";
+const JSR_ROLE_ID = "1456546757893947598";
 
-// ======== TRACKERS ========
+// 🔥 TRACKERS
 const alerted30 = new Set();
 const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
-// ======== HELPER FUNCTIONS ========
+// JSR detection (supports all formats)
 function isJSR(name) {
-  const tags = ["JSR","{JSR}","{ JSR }","{ J S R }","(JSR)","( JSR )","( J S R )"];
+  const tags = [
+    "JSR",
+    "{JSR}", "{ JSR }", "{ J S R }",
+    "(JSR)", "( JSR )", "( J S R )"
+  ];
   return tags.some(tag => name.includes(tag));
 }
 
-async function getPlayers(retries = 3) {
-  try {
-    const res = await fetch(URL);
-    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
-    const html = await res.text();
-    const $ = cheerio.load(html);
-    const players = [];
+// Fetch leaderboard
+async function getPlayers() {
+  const res = await fetch(URL);
+  const html = await res.text();
+  const $ = cheerio.load(html);
 
-    $("table").each((_, table) => {
-      const rows = $(table).find("tr");
-      const header = rows.first().text().trim();
-      const idMatch = header.match(/^(\d+)/);
-      const serverId = idMatch ? idMatch[1] : "";
+  const players = [];
 
-      if (!header.includes(`- ${TARGET_REGION}`) || serverId !== TARGET_SERVER_ID) return;
+  $("table").each((_, table) => {
+    const rows = $(table).find("tr");
 
-      rows.each((_, row) => {
-        const cells = $(row).find("td");
-        if (cells.length === 3) {
-          const name = $(cells[1]).text().trim();
-          const score = parseInt($(cells[2]).text().replace(/,/g, ""), 10);
-          if (!isNaN(score)) players.push({ name, score });
+    let header = rows.first().text().trim();
+    let idMatch = header.match(/^(\d+)/);
+    let serverId = idMatch ? idMatch[1] : "";
+
+    if (!header.includes(`- ${TARGET_REGION}`) || serverId !== TARGET_SERVER_ID) return;
+
+    rows.each((_, row) => {
+      const cells = $(row).find("td");
+      if (cells.length === 3) {
+        const name = $(cells[1]).text().trim();
+        const score = parseInt($(cells[2]).text().replace(/,/g, ""), 10);
+        if (!isNaN(score)) {
+          players.push({ name, score });
         }
-      });
+      }
     });
+  });
 
-    return players;
-  } catch (err) {
-    console.error("Fetch Error:", err.message);
-    if (retries > 0) {
-      await new Promise(r => setTimeout(r, 5000));
-      return getPlayers(retries - 1);
-    }
-    return [];
-  }
+  return players;
 }
 
+// EMBEDS
 function helpEmbed(p) {
-  return new MessageEmbed()
-    .setColor("#00ff99")
+  return new EmbedBuilder()
+    .setColor(0x00ff99)
     .setDescription(`🛡️ JSR NEEDS HELP 🛡️\n🐍 ${p.name}\n📏 ${p.score}`);
 }
 
-// ======== DISCORD CLIENT ========
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+});
 
 client.once("ready", async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`Logged in as ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID).catch(err => {
-    console.error("❌ Failed to fetch channel:", err);
-    process.exit(1);
-  });
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
 
-  await channel.send("🟢 BOT ONLINE 🚀").catch(console.error);
+  if (!channel) {
+    console.log("❌ Channel not found");
+    return;
+  }
 
-  // Online message every 30 minutes
-  setInterval(() => {
-    channel.send("🟢 BOT STILL ONLINE 🚀").catch(console.error);
-  }, 30 * 60 * 1000);
+  console.log("✅ Channel OK");
 
-  // Main leaderboard loop
+  // START MESSAGE
+  try {
+    await channel.send("🟢 BOT ONLINE 🚀");
+    console.log("✅ Start message sent");
+  } catch (err) {
+    console.error("❌ Send failed:", err.message);
+  }
+
+  // EVERY 30 MIN
   setInterval(async () => {
     try {
+      await channel.send("🟢 BOT STILL ONLINE 🚀");
+    } catch {}
+  }, 30 * 60 * 1000);
+
+  // 🔥 MAIN LOGIC
+  setInterval(async () => {
+    try {
+      console.log("Checking leaderboard...");
+
       const players = await getPlayers();
+
       for (const p of players) {
 
-        // Non-JSR alerts
+        // 🔴 NON-JSR PLAYERS
+
         if (!isJSR(p.name)) {
+
+          // 30K ALERT
           if (p.score >= 30000 && !alerted30.has(p.name)) {
-            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score}) — ATTACK NOW ⚔️`).catch(console.error);
+            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score}) — ATTACK NOW ⚔️`);
             alerted30.add(p.name);
           }
+
+          // 80K ULTRA ALERT
           if (p.score >= 80000 && !alerted80.has(p.name)) {
-            await channel.send(`💀💀 ULTRA TARGET 💀💀\n${p.name} (${p.score}) — ALL ATTACK 🔥`).catch(console.error);
+            await channel.send(`💀💀 ULTRA TARGET 💀💀\n${p.name} (${p.score}) — ALL ATTACK 🔥`);
             alerted80.add(p.name);
           }
+
         }
 
-        // JSR alerts
+        // 🟢 JSR PLAYERS
+
         if (isJSR(p.name)) {
+
+          // 20K HELP
           if (p.score >= 20000 && !jsr20.has(p.name)) {
-            await channel.send({ content: `<@&${JSR_ROLE_ID}> HELP NOW!`, embeds: [helpEmbed(p)] }).catch(console.error);
+            await channel.send({
+              content: `<@&${JSR_ROLE_ID}> HELP NOW!`,
+              embeds: [helpEmbed(p)],
+            });
             jsr20.add(p.name);
           }
+
+          // 50K URGENT HELP
           if (p.score >= 50000 && !jsr50.has(p.name)) {
-            await channel.send({ content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP REQUIRED 🚨`, embeds: [helpEmbed(p)] }).catch(console.error);
+            await channel.send({
+              content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP REQUIRED 🚨`,
+              embeds: [helpEmbed(p)],
+            });
             jsr50.add(p.name);
           }
+
         }
 
       }
+
     } catch (err) {
       console.error("Loop Error:", err);
     }
   }, INTERVAL);
 });
 
-client.login(TOKEN).catch(err => console.error("Failed to login:", err));
+client.login(TOKEN);
