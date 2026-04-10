@@ -1,9 +1,9 @@
-const Discord = require("discord.js");
-const cheerio = require("cheerio");
-const https = require("https");
+import { Client, GatewayIntentBits } from "discord.js";
+import cheerio from "cheerio";
+import https from "https";
 
-const client = new Discord.Client({
-  intents: [Discord.GatewayIntentBits.Guilds],
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
 });
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -13,7 +13,6 @@ const URL = "https://ntl-slither.com/ss/";
 const INTERVAL = 60000;
 const JSR_ROLE_ID = "1456546757893947598";
 
-// trackers
 const alerted30 = new Set();
 const alerted80 = new Set();
 const jsr20 = new Set();
@@ -23,7 +22,6 @@ function isJSR(name) {
   return name.includes("JSR");
 }
 
-// ✅ SAFE FETCH (no dependency)
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -34,7 +32,6 @@ function fetchHTML(url) {
   });
 }
 
-// ✅ ONLY SERVER 8828
 async function getPlayers() {
   const html = await fetchHTML(URL);
   const $ = cheerio.load(html);
@@ -57,4 +54,53 @@ async function getPlayers() {
         const name = $(cells[1]).text().trim();
         const score = parseInt($(cells[2]).text().replace(/,/g, ""), 10);
 
-        if (!is
+        if (!isNaN(score)) {
+          players.push({ name, score });
+        }
+      }
+    });
+  });
+
+  return players;
+}
+
+client.once("ready", async () => {
+  console.log("Bot ready");
+
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+  if (!channel) return console.log("Channel not found");
+
+  await channel.send("🟢 BOT ONLINE 🚀").catch(() => {});
+
+  setInterval(() => {
+    channel.send("🟢 BOT STILL ONLINE 🚀").catch(() => {});
+  }, 30 * 60 * 1000);
+
+  setInterval(async () => {
+    try {
+      console.log("Checking leaderboard...");
+
+      const players = await getPlayers();
+
+      for (const p of players) {
+
+        if (!isJSR(p.name)) {
+
+          if (p.score >= 30000 && !alerted30.has(p.name)) {
+            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score})`);
+            alerted30.add(p.name);
+          }
+
+          if (p.score >= 80000 && !alerted80.has(p.name)) {
+            await channel.send(`💀 ULTRA TARGET 💀\n${p.name} (${p.score})`);
+            alerted80.add(p.name);
+          }
+
+        } else {
+
+          if (p.score >= 20000 && !jsr20.has(p.name)) {
+            await channel.send(`<@&${JSR_ROLE_ID}> HELP NOW! ${p.name} (${p.score})`);
+            jsr20.add(p.name);
+          }
+
+          if (p.score >= 500
