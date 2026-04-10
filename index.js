@@ -1,9 +1,9 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
 
-// 🛡️ GLOBAL CRASH PROTECTION
-process.on("unhandledRejection", err => console.log("Unhandled:", err));
-process.on("uncaughtException", err => console.log("Uncaught:", err));
+// 🛡️ GLOBAL PROTECTION
+process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
+process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
@@ -22,23 +22,25 @@ const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
+let lastTopPlayer = null;
+
+// 🔍 detect JSR
 function isJSR(name) {
   return name.includes("JSR");
 }
 
-// ✅ SAFE FETCH
+// 🌐 SAFE FETCH
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
       let data = "";
-
       res.on("data", chunk => data += chunk);
       res.on("end", () => resolve(data));
     }).on("error", reject);
   });
 }
 
-// ✅ RAW PARSER (NO LIB CRASH)
+// 🧠 RAW PARSER (8828 ONLY)
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -82,34 +84,54 @@ client.once("ready", async () => {
     console.log("Start message failed");
   }
 
-  // 🟢 30 min ping
+  // 🟢 30 min heartbeat
   setInterval(() => {
     channel.send("🟢 BOT STILL ONLINE 🚀").catch(() => {});
   }, 30 * 60 * 1000);
 
-  // 🔥 MAIN LOOP (FULL PROTECTION)
+  // 🔥 MAIN LOOP
   setInterval(async () => {
     console.log("Checking leaderboard...");
 
     let html;
     try {
       html = await fetchHTML(URL);
-    } catch {
-      console.log("Fetch failed — skip");
+    } catch (err) {
+      console.log("Fetch error:", err?.message);
       return;
     }
 
     let players;
     try {
       players = extractPlayers(html);
-    } catch {
-      console.log("Parse failed — skip");
+    } catch (err) {
+      console.log("Parse error:", err?.message);
       return;
     }
 
+    // 👑 KING DETECTOR (FIXED)
+    let currentTop = null;
+    for (const p of players) {
+      if (!currentTop || p.score > currentTop.score) {
+        currentTop = p;
+      }
+    }
+
+    if (currentTop && currentTop.name !== lastTopPlayer) {
+      lastTopPlayer = currentTop.name;
+
+      try {
+        await channel.send(`👑 NEW KING 👑\n${currentTop.name} (${currentTop.score})`);
+      } catch (err) {
+        console.log("King send error:", err?.message);
+      }
+    }
+
+    // ⚔️ ALERT SYSTEM
     for (const p of players) {
       try {
 
+        // 🔴 NON-JSR
         if (!isJSR(p.name)) {
 
           if (p.score >= 30000 && !alerted30.has(p.name)) {
@@ -122,7 +144,10 @@ client.once("ready", async () => {
             alerted80.add(p.name);
           }
 
-        } else {
+        }
+
+        // 🟢 JSR
+        else {
 
           if (p.score >= 20000 && !jsr20.has(p.name)) {
             await channel.send(`<@&${JSR_ROLE_ID}> HELP NOW! ${p.name} (${p.score})`);
@@ -136,8 +161,8 @@ client.once("ready", async () => {
 
         }
 
-      } catch {
-        console.log("Send failed — skipped");
+      } catch (err) {
+        console.log("Send error:", err?.message);
       }
     }
 
