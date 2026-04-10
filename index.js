@@ -1,6 +1,5 @@
-import { Client, GatewayIntentBits } from "discord.js";
-import cheerio from "cheerio";
-import https from "https";
+const { Client, GatewayIntentBits } = require("discord.js");
+const https = require("https");
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
@@ -22,6 +21,7 @@ function isJSR(name) {
   return name.includes("JSR");
 }
 
+// 🔥 SIMPLE HTML FETCH
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -32,34 +32,35 @@ function fetchHTML(url) {
   });
 }
 
-async function getPlayers() {
-  const html = await fetchHTML(URL);
-  const $ = cheerio.load(html);
-
+// 🔥 NO CHEERIO PARSER (RAW PARSE = NO CRASH)
+function extractPlayers(html) {
   const players = [];
 
-  $("table").each((_, table) => {
-    const rows = $(table).find("tr");
+  const tables = html.split("<table");
 
-    const header = rows.first().text().trim();
-    const idMatch = header.match(/^(\d+)/);
-    const serverId = idMatch ? idMatch[1] : "";
+  for (const table of tables) {
+    if (!table.includes("8828") || !table.includes("- IN")) continue;
 
-    if (serverId !== "8828" || !header.includes("- IN")) return;
+    const rows = table.split("<tr");
 
-    rows.each((_, row) => {
-      const cells = $(row).find("td");
+    for (const row of rows) {
+      const cols = row.split("<td");
 
-      if (cells.length === 3) {
-        const name = $(cells[1]).text().trim();
-        const score = parseInt($(cells[2]).text().replace(/,/g, ""), 10);
+      if (cols.length >= 4) {
+        const nameMatch = cols[2].match(/>(.*?)</);
+        const scoreMatch = cols[3].match(/>(.*?)</);
 
-        if (!isNaN(score)) {
-          players.push({ name, score });
+        if (nameMatch && scoreMatch) {
+          const name = nameMatch[1].trim();
+          const score = parseInt(scoreMatch[1].replace(/,/g, ""), 10);
+
+          if (!isNaN(score)) {
+            players.push({ name, score });
+          }
         }
       }
-    });
-  });
+    }
+  }
 
   return players;
 }
@@ -80,7 +81,8 @@ client.once("ready", async () => {
     try {
       console.log("Checking leaderboard...");
 
-      const players = await getPlayers();
+      const html = await fetchHTML(URL);
+      const players = extractPlayers(html);
 
       for (const p of players) {
 
@@ -103,4 +105,19 @@ client.once("ready", async () => {
             jsr20.add(p.name);
           }
 
-          if (p.score >= 500
+          if (p.score >= 50000 && !jsr50.has(p.name)) {
+            await channel.send(`<@&${JSR_ROLE_ID}> 🚨 URGENT HELP 🚨 ${p.name} (${p.score})`);
+            jsr50.add(p.name);
+          }
+
+        }
+
+      }
+
+    } catch (err) {
+      console.log("Loop error:", err.message);
+    }
+  }, INTERVAL);
+});
+
+client.login(TOKEN);
