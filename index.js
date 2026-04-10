@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const cheerio = require("cheerio");
+const fetch = require("node-fetch");
 
 // crash protection
 process.on("unhandledRejection", console.error);
@@ -20,7 +21,7 @@ const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
-// JSR detection
+// detect JSR (all formats)
 function isJSR(name) {
   const tags = ["JSR", "{JSR}", "{ JSR }", "{ J S R }", "(JSR)", "( JSR )", "( J S R )"];
   return tags.some(tag => name.includes(tag));
@@ -78,14 +79,15 @@ client.once("ready", async () => {
 
   console.log("✅ Channel OK");
 
-  // start msg
+  // start message
   try {
     await channel.send("🟢 BOT ONLINE 🚀");
+    console.log("✅ Start message sent");
   } catch (err) {
-    console.error("Send failed:", err.message);
+    console.error("❌ Send failed:", err.message);
   }
 
-  // 30 min ping
+  // every 30 min
   setInterval(() => {
     channel.send("🟢 BOT STILL ONLINE 🚀").catch(() => {});
   }, 30 * 60 * 1000);
@@ -99,22 +101,22 @@ client.once("ready", async () => {
 
       for (const p of players) {
 
-        // NON-JSR
+        // 🔴 NON-JSR
         if (!isJSR(p.name)) {
 
           if (p.score >= 30000 && !alerted30.has(p.name)) {
-            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score})`);
+            await channel.send(`🚨 KILL TARGET 🚨\n${p.name} (${p.score}) — ATTACK NOW ⚔️`);
             alerted30.add(p.name);
           }
 
           if (p.score >= 80000 && !alerted80.has(p.name)) {
-            await channel.send(`💀 ULTRA TARGET 💀\n${p.name} (${p.score})`);
+            await channel.send(`💀 ULTRA TARGET 💀\n${p.name} (${p.score}) — ALL ATTACK 🔥`);
             alerted80.add(p.name);
           }
 
         }
 
-        // JSR
+        // 🟢 JSR
         if (isJSR(p.name)) {
 
           if (p.score >= 20000 && !jsr20.has(p.name)) {
@@ -127,7 +129,7 @@ client.once("ready", async () => {
 
           if (p.score >= 50000 && !jsr50.has(p.name)) {
             await channel.send({
-              content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP 🚨`,
+              content: `<@&${JSR_ROLE_ID}> 🚨 URGENT HELP REQUIRED 🚨`,
               embeds: [helpEmbed(p)],
             });
             jsr50.add(p.name);
