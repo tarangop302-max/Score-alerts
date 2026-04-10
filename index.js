@@ -1,5 +1,6 @@
 const Discord = require("discord.js");
 const cheerio = require("cheerio");
+const https = require("https");
 
 const client = new Discord.Client({
   intents: [Discord.GatewayIntentBits.Guilds],
@@ -18,16 +19,26 @@ const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
 
-// detect JSR
+// JSR detect
 function isJSR(name) {
-  const tags = ["JSR", "{JSR}", "{ JSR }", "{ J S R }", "(JSR)", "( JSR )", "( J S R )"];
-  return tags.some(tag => name.includes(tag));
+  return name.includes("JSR");
 }
 
-// 🔥 FILTERED ONLY 8828 SERVER
+// 🔥 SAFE FETCH (NO CRASH)
+function fetchHTML(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let data = "";
+
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => resolve(data));
+    }).on("error", reject);
+  });
+}
+
+// 🔥 ONLY 8828 SERVER
 async function getPlayers() {
-  const res = await fetch(URL);
-  const html = await res.text();
+  const html = await fetchHTML(URL);
   const $ = cheerio.load(html);
 
   const players = [];
@@ -39,7 +50,6 @@ async function getPlayers() {
     const idMatch = header.match(/^(\d+)/);
     const serverId = idMatch ? idMatch[1] : "";
 
-    // ✅ ONLY SERVER 8828 (INDIA)
     if (serverId !== "8828" || !header.includes("- IN")) return;
 
     rows.each((_, row) => {
@@ -67,7 +77,7 @@ client.once("ready", async () => {
 
   await channel.send("🟢 BOT ONLINE 🚀").catch(() => {});
 
-  // every 30 min
+  // 30 min status
   setInterval(() => {
     channel.send("🟢 BOT STILL ONLINE 🚀").catch(() => {});
   }, 30 * 60 * 1000);
@@ -113,8 +123,8 @@ client.once("ready", async () => {
 
       }
 
-    } catch (e) {
-      console.log("Error:", e.message);
+    } catch (err) {
+      console.log("Loop error:", err.message);
     }
   }, INTERVAL);
 });
