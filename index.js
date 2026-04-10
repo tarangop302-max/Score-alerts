@@ -11,6 +11,7 @@ const client = new Client({
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
+const KING_CHANNEL_ID = "1492009160920006666"; // 👑 NEW CHANNEL
 
 const URL = "https://ntl-slither.com/ss/";
 const INTERVAL = 60000;
@@ -21,6 +22,9 @@ const alerted30 = new Set();
 const alerted80 = new Set();
 const jsr20 = new Set();
 const jsr50 = new Set();
+
+let lastTopPlayer = null;
+let lastKingTime = 0;
 
 // 🔍 detect JSR
 function isJSR(name) {
@@ -74,7 +78,10 @@ client.once("ready", async () => {
   console.log("Bot ready");
 
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-  if (!channel) return console.log("Channel not found");
+  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(() => null);
+
+  if (!channel) return console.log("Main channel not found");
+  if (!kingChannel) return console.log("King channel not found");
 
   await channel.send("🟢 **JSR ALERT BOT ONLINE 🚀**").catch(() => {});
 
@@ -90,7 +97,6 @@ client.once("ready", async () => {
     try {
       html = await fetchHTML(URL);
     } catch {
-      console.log("Fetch failed");
       return;
     }
 
@@ -98,17 +104,49 @@ client.once("ready", async () => {
     try {
       players = extractPlayers(html);
     } catch {
-      console.log("Parse failed");
       return;
     }
 
+    // 👑 KING SYSTEM (separate channel + anti spam)
+    let currentTop = null;
+    for (const p of players) {
+      if (!currentTop || p.score > currentTop.score) {
+        currentTop = p;
+      }
+    }
+
+    if (currentTop) {
+      const now = Date.now();
+
+      // ⛔ only send if changed + 2 min gap
+      if (
+        currentTop.name !== lastTopPlayer &&
+        now - lastKingTime > 120000
+      ) {
+        lastTopPlayer = currentTop.name;
+        lastKingTime = now;
+
+        const embed = {
+          color: 0xffd700,
+          title: "👑 NEW KING 👑",
+          description:
+            `🐍 **${currentTop.name}**\n` +
+            `📏 **${currentTop.score.toLocaleString()} length**\n\n` +
+            `🔥 **DOMINATING SERVER 8828**`,
+          timestamp: new Date(),
+        };
+
+        await kingChannel.send({ embeds: [embed] }).catch(() => {});
+      }
+    }
+
+    // ⚔️ ALERT SYSTEM
     for (const p of players) {
       try {
 
-        // 🔴 RANDOM PLAYERS
+        // 🔴 RANDOM
         if (!isJSR(p.name)) {
 
-          // 30K
           if (p.score >= 30000 && !alerted30.has(p.name)) {
             const embed = {
               color: 0xff0000,
@@ -123,7 +161,6 @@ client.once("ready", async () => {
             alerted30.add(p.name);
           }
 
-          // 80K
           if (p.score >= 80000 && !alerted80.has(p.name)) {
             const embed = {
               color: 0x8b0000,
@@ -131,7 +168,7 @@ client.once("ready", async () => {
               description:
                 `🐍 **${p.name}**\n` +
                 `📏 **${p.score.toLocaleString()} length**\n\n` +
-                `🔥 **ALL PLAYERS ATTACK NOW — NO MERCY**`,
+                `🔥 **ALL PLAYERS ATTACK NOW**`,
               timestamp: new Date(),
             };
             await channel.send({ embeds: [embed] });
@@ -140,10 +177,9 @@ client.once("ready", async () => {
 
         }
 
-        // 🟢 JSR PLAYERS
+        // 🟢 JSR
         else {
 
-          // 20K
           if (p.score >= 20000 && !jsr20.has(p.name)) {
             const embed = {
               color: 0x00ff99,
@@ -151,7 +187,7 @@ client.once("ready", async () => {
               description:
                 `🐍 **${p.name}**\n` +
                 `📏 **${p.score.toLocaleString()} length**\n\n` +
-                `🤝 **PROTECT. FEED. DEFEND.**`,
+                `🤝 **PROTECT & SUPPORT**`,
               timestamp: new Date(),
             };
             await channel.send({
@@ -161,15 +197,14 @@ client.once("ready", async () => {
             jsr20.add(p.name);
           }
 
-          // 50K
           if (p.score >= 50000 && !jsr50.has(p.name)) {
             const embed = {
               color: 0x00cc66,
-              title: "🚨 JSR CRITICAL ALERT 🚨",
+              title: "🚨 JSR CRITICAL 🚨",
               description:
                 `🐍 **${p.name}**\n` +
                 `📏 **${p.score.toLocaleString()} length**\n\n` +
-                `⚡ **ALL MEMBERS — IMMEDIATE ASSIST REQUIRED**`,
+                `⚡ **ALL MEMBERS ASSIST NOW**`,
               timestamp: new Date(),
             };
             await channel.send({
@@ -181,9 +216,7 @@ client.once("ready", async () => {
 
         }
 
-      } catch (err) {
-        console.log("Send error:", err?.message);
-      }
+      } catch {}
     }
 
   }, INTERVAL);
