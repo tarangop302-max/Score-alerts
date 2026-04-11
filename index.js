@@ -14,26 +14,21 @@ const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
 
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 5000; // ⚡ GOD MODE (5 sec)
+const INTERVAL = 5000; // ⚡ fast
 const JSR_ROLE_ID = "1456546757893947598";
 
-// trackers
-let activePlayers = new Set();
-
-const alerted30 = new Set();
-const alerted80 = new Set();
-const jsr20 = new Set();
-const jsr50 = new Set();
+// 🧠 score tracking (IMPORTANT)
+const lastScores = new Map();
 
 let lastTopPlayer = null;
 let lastKingTime = 0;
 
-// 🔍 detect JSR
+// detect JSR
 function isJSR(name) {
   return name.includes("JSR");
 }
 
-// 🌐 fetch
+// fetch
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -44,7 +39,7 @@ function fetchHTML(url) {
   });
 }
 
-// 🧠 parse ONLY 8828
+// parse only 8828
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -84,11 +79,11 @@ client.once("ready", async () => {
 
   if (!channel || !kingChannel) return console.log("Channel error");
 
-  await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
+  await channel.send("🟢 **JSR GOD MODE ACTIVE ⚡**").catch(() => {});
 
-  // 🔥 heartbeat (no spam)
+  // 🔥 low spam heartbeat
   setInterval(() => {
-    channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
+    channel.send("🟢 **BOT RUNNING (GOD MODE) ⚡**").catch(() => {});
   }, 3 * 60 * 60 * 1000);
 
   setInterval(async () => {
@@ -107,20 +102,7 @@ client.once("ready", async () => {
       return;
     }
 
-    // 🧠 RESET SYSTEM
-    const currentNames = new Set(players.map(p => p.name));
-
-    for (const name of [...activePlayers]) {
-      if (!currentNames.has(name)) {
-        alerted30.delete(name);
-        alerted80.delete(name);
-        jsr20.delete(name);
-        jsr50.delete(name);
-        activePlayers.delete(name);
-      }
-    }
-
-    // 👑 KING SYSTEM (ULTRA UI + cooldown)
+    // 👑 KING SYSTEM
     let currentTop = null;
     for (const p of players) {
       if (!currentTop || p.score > currentTop.score) {
@@ -154,17 +136,19 @@ client.once("ready", async () => {
       }
     }
 
-    // ⚔️ ALERT SYSTEM (ULTRA UI)
+    // ⚔️ ALERT SYSTEM (THRESHOLD BASED)
     for (const p of players) {
-      activePlayers.add(p.name);
+      const prev = lastScores.get(p.name) || 0;
 
       try {
 
         // 🔴 RANDOM PLAYERS
         if (!isJSR(p.name)) {
 
-          if (p.score >= 30000 && !alerted30.has(p.name)) {
+          // 🚨 30K CROSS
+          if (prev < 30000 && p.score >= 30000) {
             await channel.send({
+              content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
                 color: 0xff2d2d,
                 title: "🚨 TARGET ACQUIRED",
@@ -179,11 +163,12 @@ client.once("ready", async () => {
                 timestamp: new Date(),
               }]
             });
-            alerted30.add(p.name);
           }
 
-          if (p.score >= 80000 && !alerted80.has(p.name)) {
+          // 💀 80K CROSS
+          if (prev < 80000 && p.score >= 80000) {
             await channel.send({
+              content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
                 color: 0x990000,
                 title: "💀 ULTRA THREAT",
@@ -198,7 +183,6 @@ client.once("ready", async () => {
                 timestamp: new Date(),
               }]
             });
-            alerted80.add(p.name);
           }
 
         }
@@ -206,7 +190,8 @@ client.once("ready", async () => {
         // 🟢 JSR PLAYERS
         else {
 
-          if (p.score >= 20000 && !jsr20.has(p.name)) {
+          // 🛡️ 20K CROSS
+          if (prev < 20000 && p.score >= 20000) {
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -223,10 +208,10 @@ client.once("ready", async () => {
                 timestamp: new Date(),
               }]
             });
-            jsr20.add(p.name);
           }
 
-          if (p.score >= 50000 && !jsr50.has(p.name)) {
+          // 🚨 50K CROSS
+          if (prev < 50000 && p.score >= 50000) {
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -243,7 +228,6 @@ client.once("ready", async () => {
                 timestamp: new Date(),
               }]
             });
-            jsr50.add(p.name);
           }
 
         }
@@ -251,6 +235,9 @@ client.once("ready", async () => {
       } catch (err) {
         console.log("Send error:", err?.message);
       }
+
+      // 🔥 IMPORTANT: update score AFTER checks
+      lastScores.set(p.name, p.score);
     }
 
   }, INTERVAL);
