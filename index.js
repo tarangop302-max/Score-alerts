@@ -18,8 +18,11 @@ const INTERVAL = 5000;
 
 const JSR_ROLE_ID = "1456546757893947598";
 
-// 🧠 score tracking
-const lastScores = new Map();
+// 🧠 memory systems (ANTI-SPAM)
+const alerted30 = new Set();
+const alerted80 = new Set();
+const alerted20 = new Set();
+const alerted50 = new Set();
 
 let lastTopPlayer = null;
 let lastKingTime = 0;
@@ -96,7 +99,7 @@ client.once("ready", async () => {
 
   await channel.send("🟢 **JSR GOD MODE ACTIVE ⚡**").catch(() => {});
 
-  // 🔥 low spam heartbeat
+  // 💤 very low spam heartbeat (every 3 hours)
   setInterval(() => {
     channel.send("🟢 **BOT RUNNING (GOD MODE) ⚡**").catch(() => {});
   }, 3 * 60 * 60 * 1000);
@@ -139,9 +142,9 @@ client.once("ready", async () => {
             description:
               "━━━━━━━━━━━━━━━━━━\n" +
               `🔥 **DOMINATING PLAYER**\n\n` +
-              `🐍 **Name**   : ${currentTop.name}\n` +
-              `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
-              "⚔️ **STATUS**\nALL PLAYERS TARGET THIS KING\n" +
+              `🐍 Name   : ${currentTop.name}\n` +
+              `📏 Length : ${currentTop.score.toLocaleString()}\n\n` +
+              "⚔️ ALL PLAYERS TARGET THIS KING\n" +
               "━━━━━━━━━━━━━━━━━━",
             footer: { text: "👑 JSR King Monitor" },
             timestamp: new Date(),
@@ -150,16 +153,18 @@ client.once("ready", async () => {
       }
     }
 
-    // ⚔️ ALERT SYSTEM (THRESHOLD BASED)
+    // ⚔️ ALERT SYSTEM (NO SPAM)
     for (const p of players) {
-      const prev = lastScores.get(p.name) || 0;
 
       try {
 
-        // 🔴 NON-JSR PLAYERS
+        // 🔴 NON-JSR
         if (!isJSR(p.name)) {
 
-          if (prev < 30000 && p.score >= 30000) {
+          // 🚨 30K
+          if (p.score >= 30000 && !alerted30.has(p.name)) {
+            alerted30.add(p.name);
+
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -178,7 +183,10 @@ client.once("ready", async () => {
             });
           }
 
-          if (prev < 80000 && p.score >= 80000) {
+          // 💀 80K
+          if (p.score >= 80000 && !alerted80.has(p.name)) {
+            alerted80.add(p.name);
+
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -189,7 +197,7 @@ client.once("ready", async () => {
                   `🔥 EXTREME TARGET\n\n` +
                   `🐍 Name   : ${p.name}\n` +
                   `📏 Length : ${p.score.toLocaleString()}\n\n` +
-                  "🚨 GLOBAL ORDER\nALL PLAYERS → ATTACK NOW\n" +
+                  "🚨 GLOBAL ORDER\nATTACK IMMEDIATELY\n" +
                   "━━━━━━━━━━━━━━━━━━",
                 footer: { text: "☠️ JSR War Protocol" },
                 timestamp: new Date(),
@@ -199,10 +207,13 @@ client.once("ready", async () => {
 
         }
 
-        // 🟢 JSR PLAYERS
+        // 🟢 JSR
         else {
 
-          if (prev < 20000 && p.score >= 20000) {
+          // 🛡️ 20K
+          if (p.score >= 20000 && !alerted20.has(p.name)) {
+            alerted20.add(p.name);
+
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -221,7 +232,10 @@ client.once("ready", async () => {
             });
           }
 
-          if (prev < 50000 && p.score >= 50000) {
+          // 🚨 50K
+          if (p.score >= 50000 && !alerted50.has(p.name)) {
+            alerted50.add(p.name);
+
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -232,7 +246,7 @@ client.once("ready", async () => {
                   `⚠️ HIGH VALUE JSR\n\n` +
                   `🐍 Name   : ${p.name}\n` +
                   `📏 Length : ${p.score.toLocaleString()}\n\n` +
-                  "🔥 EMERGENCY ORDER\nDEFEND AT ALL COSTS\n" +
+                  "🔥 DEFEND AT ALL COSTS\n" +
                   "━━━━━━━━━━━━━━━━━━",
                 footer: { text: "⚡ JSR Emergency Protocol" },
                 timestamp: new Date(),
@@ -245,9 +259,22 @@ client.once("ready", async () => {
       } catch (err) {
         console.log("Send error:", err?.message);
       }
+    }
 
-      // 🧠 update score AFTER checks
-      lastScores.set(p.name, p.score);
+    // 🧹 RESET when player leaves leaderboard
+    const names = players.map(p => p.name);
+
+    for (const name of alerted30) {
+      if (!names.includes(name)) alerted30.delete(name);
+    }
+    for (const name of alerted80) {
+      if (!names.includes(name)) alerted80.delete(name);
+    }
+    for (const name of alerted20) {
+      if (!names.includes(name)) alerted20.delete(name);
+    }
+    for (const name of alerted50) {
+      if (!names.includes(name)) alerted50.delete(name);
     }
 
   }, INTERVAL);
