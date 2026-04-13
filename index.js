@@ -14,21 +14,36 @@ const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
 
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 5000; // ⚡ fast
+const INTERVAL = 5000;
+
 const JSR_ROLE_ID = "1456546757893947598";
 
-// 🧠 score tracking (IMPORTANT)
+// 🧠 score tracking
 const lastScores = new Map();
 
 let lastTopPlayer = null;
 let lastKingTime = 0;
 
-// detect JSR
+// 🔥 STRICT JSR DETECTION
 function isJSR(name) {
-  return name.includes("JSR");
+  const patterns = [
+    "{JSR}",
+    "{ JSR }",
+    "{ J S R }",
+    "(JSR)",
+    "( JSR )",
+    "( J S R )",
+    "JSR"
+  ];
+
+  const lowerName = name.toLowerCase();
+
+  return patterns.some(p =>
+    lowerName.includes(p.toLowerCase())
+  );
 }
 
-// fetch
+// 🌐 fetch
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -39,7 +54,7 @@ function fetchHTML(url) {
   });
 }
 
-// parse only 8828
+// 🎯 ONLY SERVER 8828
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -117,22 +132,21 @@ client.once("ready", async () => {
         lastTopPlayer = currentTop.name;
         lastKingTime = now;
 
-        const embed = {
-          color: 0xffd700,
-          title: "👑 KING OF THE SERVER 👑",
-          description:
-            "━━━━━━━━━━━━━━━━━━\n" +
-            `🔥 **DOMINATING PLAYER**\n\n` +
-            `🐍 **Name**   : ${currentTop.name}\n` +
-            `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
-            "⚔️ **STATUS**\n" +
-            "ALL PLAYERS TARGET THIS KING\n" +
-            "━━━━━━━━━━━━━━━━━━",
-          footer: { text: "👑 JSR King Monitor" },
-          timestamp: new Date(),
-        };
-
-        await kingChannel.send({ embeds: [embed] }).catch(() => {});
+        await kingChannel.send({
+          embeds: [{
+            color: 0xffd700,
+            title: "👑 KING OF THE SERVER 👑",
+            description:
+              "━━━━━━━━━━━━━━━━━━\n" +
+              `🔥 **DOMINATING PLAYER**\n\n` +
+              `🐍 **Name**   : ${currentTop.name}\n` +
+              `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
+              "⚔️ **STATUS**\nALL PLAYERS TARGET THIS KING\n" +
+              "━━━━━━━━━━━━━━━━━━",
+            footer: { text: "👑 JSR King Monitor" },
+            timestamp: new Date(),
+          }]
+        }).catch(() => {});
       }
     }
 
@@ -142,10 +156,9 @@ client.once("ready", async () => {
 
       try {
 
-        // 🔴 RANDOM PLAYERS
+        // 🔴 NON-JSR PLAYERS
         if (!isJSR(p.name)) {
 
-          // 🚨 30K CROSS
           if (prev < 30000 && p.score >= 30000) {
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
@@ -165,7 +178,6 @@ client.once("ready", async () => {
             });
           }
 
-          // 💀 80K CROSS
           if (prev < 80000 && p.score >= 80000) {
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
@@ -190,7 +202,6 @@ client.once("ready", async () => {
         // 🟢 JSR PLAYERS
         else {
 
-          // 🛡️ 20K CROSS
           if (prev < 20000 && p.score >= 20000) {
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
@@ -210,7 +221,6 @@ client.once("ready", async () => {
             });
           }
 
-          // 🚨 50K CROSS
           if (prev < 50000 && p.score >= 50000) {
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
@@ -236,7 +246,7 @@ client.once("ready", async () => {
         console.log("Send error:", err?.message);
       }
 
-      // 🔥 IMPORTANT: update score AFTER checks
+      // 🧠 update score AFTER checks
       lastScores.set(p.name, p.score);
     }
 
