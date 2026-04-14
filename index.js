@@ -13,7 +13,7 @@ const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
 
-// ✅ YOUR ROLE ID
+// ✅ YOUR ROLE
 const ROLE_ID = "1493480046986268803";
 
 const URL = "https://ntl-slither.com/ss/";
@@ -31,23 +31,23 @@ const jsr50 = new Set();
 let lastTopPlayer = null;
 let lastKingTime = 0;
 
-// 🧼 normalize
+// 🧼 normalize names (prevents duplicate spam)
 function normalizeName(name) {
   return name.replace(/\s+/g, "").toLowerCase();
 }
 
-// 🔍 JSR detect
+// 🔍 detect JSR patterns
 function isJSR(name) {
   const patterns = [
-    "{JSR}", "{ JSR }", "{ J S R }",
-    "(JSR)", "( JSR )", "( J S R )",
+    "{ J S R }", "{JSR}", "{ JSR }",
+    "( J S R )", "(JSR)", "( JSR )",
     "JSR"
   ];
   const lower = name.toLowerCase();
   return patterns.some(p => lower.includes(p.toLowerCase()));
 }
 
-// 🌐 fetch
+// 🌐 fetch HTML
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -58,7 +58,7 @@ function fetchHTML(url) {
   });
 }
 
-// 🎯 parse only 8828
+// 🎯 extract players (server 8828)
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -98,8 +98,10 @@ client.once("ready", async () => {
 
   if (!channel || !kingChannel) return console.log("Channel error");
 
+  // 🟢 ONLINE MESSAGE
   await channel.send("THE BOT IS ONLINE |").catch(() => {});
 
+  // ⏱️ heartbeat (no spam)
   setInterval(() => {
     channel.send("🟢 BOT ACTIVE").catch(() => {});
   }, 3 * 60 * 60 * 1000);
@@ -114,6 +116,7 @@ client.once("ready", async () => {
 
     const currentNames = new Set(players.map(p => normalizeName(p.name)));
 
+    // 🧠 cleanup old players
     for (const name of [...activePlayers]) {
       if (!currentNames.has(name)) {
         alerted30.delete(name);
@@ -125,7 +128,7 @@ client.once("ready", async () => {
       }
     }
 
-    // 👑 KING UI
+    // 👑 KING SYSTEM (clean UI)
     let currentTop = players.reduce((a, b) => !a || b.score > a.score ? b : a, null);
 
     if (currentTop) {
@@ -138,14 +141,14 @@ client.once("ready", async () => {
         await kingChannel.send({
           embeds: [{
             color: 0xffd700,
-            title: "👑 KING OF THE SERVER",
+            title: "👑 KING OF THE SERVER 👑",
             description:
-              "━━━━━━━━━━━━━━━━━━━━\n" +
-              `🏆 **TOP PLAYER**\n\n` +
-              `🐍 ${currentTop.name}\n` +
-              `📏 ${currentTop.score.toLocaleString()}\n\n` +
-              "⚔️ ALL PLAYERS TARGET THIS KING\n" +
-              "━━━━━━━━━━━━━━━━━━━━",
+              "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+              "🔥 **DOMINATING PLAYER**\n\n" +
+              `🐍 Name   : ${currentTop.name}\n` +
+              `📏 Length : ${currentTop.score.toLocaleString()}\n\n` +
+              "⚔️ ALL PLAYERS TARGET THIS KING\n\n" +
+              "━━━━━━━━━━━━━━━━━━━━━━",
             footer: { text: "👑 JSR King Monitor" },
             timestamp: new Date(),
           }]
@@ -164,7 +167,7 @@ client.once("ready", async () => {
 
       try {
 
-        // 🔴 ENEMY
+        // 🔴 ENEMY ALERTS
         if (!isJSR(p.name)) {
 
           if (prev < 30000 && curr >= 30000 && !alerted30.has(id)) {
@@ -174,14 +177,15 @@ client.once("ready", async () => {
               content: `<@&${ROLE_ID}>`,
               embeds: [{
                 color: 0xff2d2d,
-                title: "🚨 TARGET LOCKED 🚨",
+                title: "🚨 TARGET ACQUIRED 🚨",
                 description:
-                  "━━━━━━━━━━━━━━━━━━━━\n" +
-                  `🐍 **Enemy** : ${p.name}\n` +
-                  `📏 **Size**  : ${curr.toLocaleString()}\n\n` +
-                  "⚔️ **MISSION**\n• Surround\n• Trap\n• Eliminate\n" +
-                  "━━━━━━━━━━━━━━━━━━━━",
-                footer: { text: "⚡ JSR Strike System" },
+                  "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                  "🎯 **ENEMY LOCKED**\n\n" +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "⚔️ Surround • Trap • Eliminate\n\n" +
+                  "━━━━━━━━━━━━━━━━━━━━━━",
+                footer: { text: "⚡ JSR Tactical System" },
                 timestamp: new Date(),
               }]
             });
@@ -193,13 +197,15 @@ client.once("ready", async () => {
             await channel.send({
               content: `<@&${ROLE_ID}>`,
               embeds: [{
-                color: 0x8b0000,
-                title: "💀 ULTRA THREAT DETECTED",
+                color: 0x990000,
+                title: "💀 ULTRA THREAT 💀",
                 description:
-                  "━━━━━━━━━━━━━━━━━━━━\n" +
-                  `🔥 ${p.name}\n📏 ${curr.toLocaleString()}\n\n` +
-                  "🚨 ALL UNITS ATTACK NOW\n" +
-                  "━━━━━━━━━━━━━━━━━━━━",
+                  "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                  "🔥 **EXTREME TARGET**\n\n" +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "🚨 ALL PLAYERS ATTACK NOW\n\n" +
+                  "━━━━━━━━━━━━━━━━━━━━━━",
                 footer: { text: "☠️ JSR War Protocol" },
                 timestamp: new Date(),
               }]
@@ -208,7 +214,7 @@ client.once("ready", async () => {
 
         }
 
-        // 🟢 JSR
+        // 🟢 JSR ALERTS
         else {
 
           if (prev < 20000 && curr >= 20000 && !jsr20.has(id)) {
@@ -218,12 +224,14 @@ client.once("ready", async () => {
               content: `<@&${ROLE_ID}>`,
               embeds: [{
                 color: 0x00ffaa,
-                title: "🛡️ ALLY NEEDS SUPPORT",
+                title: "🛡️ ALLY SUPPORT 🛡️",
                 description:
-                  "━━━━━━━━━━━━━━━━━━━━\n" +
-                  `🐍 ${p.name}\n📏 ${curr.toLocaleString()}\n\n` +
-                  "🟢 SUPPORT IMMEDIATELY\n" +
-                  "━━━━━━━━━━━━━━━━━━━━",
+                  "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                  "🤝 **JSR MEMBER ACTIVE**\n\n" +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "🟢 Stay Close • Feed • Protect\n\n" +
+                  "━━━━━━━━━━━━━━━━━━━━━━",
                 footer: { text: "🛡️ JSR Support System" },
                 timestamp: new Date(),
               }]
@@ -237,12 +245,14 @@ client.once("ready", async () => {
               content: `<@&${ROLE_ID}>`,
               embeds: [{
                 color: 0x00cc66,
-                title: "🚨 CRITICAL ALLY",
+                title: "🚨 CRITICAL ALLY 🚨",
                 description:
-                  "━━━━━━━━━━━━━━━━━━━━\n" +
-                  `🐍 ${p.name}\n📏 ${curr.toLocaleString()}\n\n` +
-                  "🔥 DEFEND AT ALL COSTS\n" +
-                  "━━━━━━━━━━━━━━━━━━━━",
+                  "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                  "⚠️ **HIGH VALUE JSR**\n\n" +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "🔥 DEFEND AT ALL COSTS\n\n" +
+                  "━━━━━━━━━━━━━━━━━━━━━━",
                 footer: { text: "⚡ JSR Emergency System" },
                 timestamp: new Date(),
               }]
