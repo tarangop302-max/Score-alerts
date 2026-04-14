@@ -17,7 +17,7 @@ const KING_CHANNEL_ID = "1492009160920006666";
 const ROLE_ID = "1493480046986268803";
 
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 20000; // ✅ ONLY CHANGE (20 sec)
+const INTERVAL = 20000;
 
 // 🧠 tracking
 let activePlayers = new Set();
@@ -110,11 +110,22 @@ async function runBot(channel, kingChannel) {
 
     console.log("Loop running...");
 
-    let html = await fetchHTML(URL).catch(() => null);
+    let html = await fetchHTML(URL).catch((e) => {
+      console.log("Fetch failed:", e?.message);
+      return null;
+    });
+
     if (!html) return;
 
     let players = extractPlayers(html);
-    if (!players || players.length === 0) return;
+
+    // 🔥 DEBUG
+    console.log("Players found:", players?.length || 0);
+
+    if (!players || players.length === 0) {
+      console.log("No players detected");
+      return;
+    }
 
     const currentNames = new Set(players.map(p => normalizeName(p.name)));
 
@@ -159,6 +170,8 @@ async function runBot(channel, kingChannel) {
 
     // ⚔️ ALERTS
     for (const p of players) {
+
+      console.log("Player:", p.name, p.score); // 🔥 DEBUG
 
       const id = normalizeName(p.name);
       activePlayers.add(id);
