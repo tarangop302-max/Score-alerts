@@ -17,7 +17,7 @@ const KING_CHANNEL_ID = "1492009160920006666";
 const ROLE_ID = "1493480046986268803";
 
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 5000;
+const INTERVAL = 8000; // ✅ ONLY CHANGE
 
 // 🧠 tracking
 let activePlayers = new Set();
@@ -47,7 +47,7 @@ function isJSR(name) {
   return patterns.some(p => lower.includes(p.toLowerCase()));
 }
 
-// 🌐 SAFE FETCH (timeout added)
+// 🌐 SAFE FETCH
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
 
@@ -66,7 +66,7 @@ function fetchHTML(url) {
   });
 }
 
-// 🎯 parse only 8828
+// 🎯 parse
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -98,7 +98,7 @@ function extractPlayers(html) {
   return players;
 }
 
-// 🔒 anti-freeze loop control
+// 🔒 anti-freeze
 let isRunning = false;
 
 async function runBot(channel, kingChannel) {
@@ -157,7 +157,7 @@ async function runBot(channel, kingChannel) {
       }
     }
 
-    // ⚔️ ALERT SYSTEM
+    // ⚔️ ALERTS
     for (const p of players) {
 
       const id = normalizeName(p.name);
@@ -286,7 +286,6 @@ client.once("ready", async () => {
     channel.send("🟢 BOT ACTIVE").catch(() => {});
   }, 3 * 60 * 60 * 1000);
 
-  // ✅ NEW SAFE LOOP
   setInterval(() => {
     runBot(channel, kingChannel);
   }, INTERVAL);
