@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
+const http = require("http"); // ✅ ADDED
 
 // 🛡️ protection
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
@@ -8,6 +9,12 @@ process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
+
+// ✅ KEEP ALIVE SERVER (VERY IMPORTANT)
+http.createServer((req, res) => {
+  res.write("Bot is alive");
+  res.end();
+}).listen(3000);
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
@@ -110,22 +117,11 @@ async function runBot(channel, kingChannel) {
 
     console.log("Loop running...");
 
-    let html = await fetchHTML(URL).catch((e) => {
-      console.log("Fetch failed:", e?.message);
-      return null;
-    });
-
+    let html = await fetchHTML(URL).catch(() => null);
     if (!html) return;
 
     let players = extractPlayers(html);
-
-    // 🔥 DEBUG
-    console.log("Players found:", players?.length || 0);
-
-    if (!players || players.length === 0) {
-      console.log("No players detected");
-      return;
-    }
+    if (!players || players.length === 0) return;
 
     const currentNames = new Set(players.map(p => normalizeName(p.name)));
 
@@ -170,8 +166,6 @@ async function runBot(channel, kingChannel) {
 
     // ⚔️ ALERTS
     for (const p of players) {
-
-      console.log("Player:", p.name, p.score); // 🔥 DEBUG
 
       const id = normalizeName(p.name);
       activePlayers.add(id);
