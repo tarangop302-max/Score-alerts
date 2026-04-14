@@ -1,8 +1,12 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, Intents } = require("discord.js");
 const https = require("https");
 
+// 🛡️ crash protection
+process.on("unhandledRejection", err => console.log("Unhandled:", err));
+process.on("uncaughtException", err => console.log("Uncaught:", err));
+
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [Intents.FLAGS.GUILDS],
 });
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -13,24 +17,19 @@ const INTERVAL = 5000;
 
 const JSR_ROLE_ID = "1456546757893947598";
 
-// 🧠 memory
-const lastScores = new Map();
-const triggered = new Set();
+const lastScores = {};
+const triggered = {};
 
-// 🧼 normalize name (VERY IMPORTANT)
+// 🧼 normalize
 function normalizeName(name) {
   return name.replace(/\s+/g, "").toLowerCase();
 }
 
-// 🔥 STRICT JSR
+// 🔥 JSR detect
 function isJSR(name) {
   const patterns = [
-    "{JSR}",
-    "{ JSR }",
-    "{ J S R }",
-    "(JSR)",
-    "( JSR )",
-    "( J S R )",
+    "{JSR}", "{ JSR }", "{ J S R }",
+    "(JSR)", "( JSR )", "( J S R )",
     "JSR"
   ];
 
@@ -43,13 +42,13 @@ function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, res => {
       let data = "";
-      res.on("data", chunk => data += chunk);
+      res.on("data", d => data += d);
       res.on("end", () => resolve(data));
     }).on("error", reject);
   });
 }
 
-// 🎯 ONLY SERVER 8828
+// 🎯 extract
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -63,16 +62,11 @@ function extractPlayers(html) {
       const cols = row.split("<td");
 
       if (cols.length >= 4) {
-        const nameMatch = cols[2].match(/>(.*?)</);
-        const scoreMatch = cols[3].match(/>(.*?)</);
+        const name = cols[2]?.replace(/<[^>]+>/g, "").trim();
+        const score = parseInt(cols[3]?.replace(/<[^>]+>/g, "").replace(/,/g, ""));
 
-        if (nameMatch && scoreMatch) {
-          const name = nameMatch[1].trim();
-          const score = parseInt(scoreMatch[1].replace(/,/g, ""), 10);
-
-          if (!isNaN(score)) {
-            players.push({ name, score });
-          }
+        if (name && !isNaN(score)) {
+          players.push({ name, score });
         }
       }
     }
@@ -81,13 +75,13 @@ function extractPlayers(html) {
   return players;
 }
 
-client.once("ready", async () => {
+client.on("ready", async () => {
   console.log("Bot ready");
 
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-  if (!channel) return console.log("Channel error");
+  if (!channel) return console.log("Channel not found");
 
-  await channel.send("🟢 **JSR SYSTEM ONLINE ⚡**");
+  channel.send("🟢 BOT ONLINE").catch(() => {});
 
   setInterval(async () => {
 
@@ -108,7 +102,7 @@ client.once("ready", async () => {
     for (const p of players) {
 
       const id = normalizeName(p.name);
-      const prev = lastScores.get(id) || 0;
+      const prev = lastScores[id] || 0;
       const curr = p.score;
 
       try {
@@ -116,103 +110,48 @@ client.once("ready", async () => {
         // 🔴 NON-JSR
         if (!isJSR(p.name)) {
 
-          // 🎯 30K
-          if (prev < 30000 && curr >= 30000 && !triggered.has(id)) {
+          if (prev < 30000 && curr >= 30000 && !triggered[id]) {
+            triggered[id] = true;
 
-            triggered.add(id);
-            setTimeout(() => triggered.delete(id), 60000);
+            setTimeout(() => delete triggered[id], 60000);
 
-            await channel.send({
-              content: `<@&${JSR_ROLE_ID}>`,
-              embeds: [{
-                color: 0xff2d2d,
-                title: "🚨 TARGET ACQUIRED",
-                description:
-                  `🎯 ENEMY LOCKED\n\n` +
-                  `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
-                  "⚔️ ATTACK NOW",
-                timestamp: new Date(),
-              }]
-            });
+            channel.send(`<@&${JSR_ROLE_ID}> 🚨 ${p.name} hit ${curr}`);
           }
 
-          // 💀 80K
-          if (prev < 80000 && curr >= 80000 && !triggered.has(id + "_80")) {
+          if (prev < 80000 && curr >= 80000 && !triggered[id+"_80"]) {
+            triggered[id+"_80"] = true;
 
-            triggered.add(id + "_80");
-            setTimeout(() => triggered.delete(id + "_80"), 60000);
+            setTimeout(() => delete triggered[id+"_80"], 60000);
 
-            await channel.send({
-              content: `<@&${JSR_ROLE_ID}>`,
-              embeds: [{
-                color: 0x990000,
-                title: "💀 ULTRA TARGET",
-                description:
-                  `🔥 EXTREME THREAT\n\n` +
-                  `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
-                  "⚠️ ALL OUT ATTACK",
-                timestamp: new Date(),
-              }]
-            });
+            channel.send(`<@&${JSR_ROLE_ID}> 💀 ${p.name} hit ${curr}`);
           }
-
         }
 
         // 🟢 JSR
         else {
 
-          // 🛡️ 20K
-          if (prev < 20000 && curr >= 20000 && !triggered.has(id + "_20")) {
+          if (prev < 20000 && curr >= 20000 && !triggered[id+"_20"]) {
+            triggered[id+"_20"] = true;
 
-            triggered.add(id + "_20");
-            setTimeout(() => triggered.delete(id + "_20"), 60000);
+            setTimeout(() => delete triggered[id+"_20"], 60000);
 
-            await channel.send({
-              content: `<@&${JSR_ROLE_ID}>`,
-              embeds: [{
-                color: 0x00ffcc,
-                title: "🛡️ ALLY SUPPORT",
-                description:
-                  `🤝 JSR ACTIVE\n\n` +
-                  `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
-                  "🟢 SUPPORT IMMEDIATELY",
-                timestamp: new Date(),
-              }]
-            });
+            channel.send(`<@&${JSR_ROLE_ID}> 🛡️ ${p.name} hit ${curr}`);
           }
 
-          // 🚨 50K
-          if (prev < 50000 && curr >= 50000 && !triggered.has(id + "_50")) {
+          if (prev < 50000 && curr >= 50000 && !triggered[id+"_50"]) {
+            triggered[id+"_50"] = true;
 
-            triggered.add(id + "_50");
-            setTimeout(() => triggered.delete(id + "_50"), 60000);
+            setTimeout(() => delete triggered[id+"_50"], 60000);
 
-            await channel.send({
-              content: `<@&${JSR_ROLE_ID}>`,
-              embeds: [{
-                color: 0x00cc66,
-                title: "🚨 CRITICAL ALLY",
-                description:
-                  `⚠️ HIGH VALUE JSR\n\n` +
-                  `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
-                  "🔥 DEFEND NOW",
-                timestamp: new Date(),
-              }]
-            });
+            channel.send(`<@&${JSR_ROLE_ID}> 🚨 ${p.name} hit ${curr}`);
           }
-
         }
 
-      } catch (err) {
-        console.log("Error:", err?.message);
+      } catch (e) {
+        console.log("Send error:", e);
       }
 
-      // 🧠 update memory
-      lastScores.set(id, curr);
+      lastScores[id] = curr;
     }
 
   }, INTERVAL);
