@@ -1,3 +1,6 @@
+// 🔥 START LOG
+console.log("🚀 Starting bot...");
+
 const { Client, Intents } = require("discord.js");
 const https = require("https");
 
@@ -17,15 +20,16 @@ const INTERVAL = 5000;
 
 const JSR_ROLE_ID = "1456546757893947598";
 
+// 🧠 memory
 const lastScores = {};
 const triggered = {};
 
-// 🧼 normalize
+// 🧼 normalize name
 function normalizeName(name) {
   return name.replace(/\s+/g, "").toLowerCase();
 }
 
-// 🔥 JSR detect
+// 🔥 JSR detection (STRICT)
 function isJSR(name) {
   const patterns = [
     "{JSR}", "{ JSR }", "{ J S R }",
@@ -37,7 +41,7 @@ function isJSR(name) {
   return patterns.some(p => lower.includes(p.toLowerCase()));
 }
 
-// 🌐 fetch
+// 🌐 fetch HTML
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     https.get(url, res => {
@@ -48,7 +52,7 @@ function fetchHTML(url) {
   });
 }
 
-// 🎯 extract
+// 🎯 extract players (server 8828 only)
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -75,20 +79,36 @@ function extractPlayers(html) {
   return players;
 }
 
-client.on("ready", async () => {
-  console.log("Bot ready");
+// 🔥 READY EVENT
+client.once("ready", async () => {
+  console.log("✅ Bot ready as:", client.user.tag);
 
-  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-  if (!channel) return console.log("Channel not found");
+  // 🔎 FETCH CHANNEL WITH DEBUG
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(err => {
+    console.log("❌ Fetch error:", err.message);
+    return null;
+  });
 
-  channel.send("🟢 BOT ONLINE").catch(() => {});
+  if (!channel) {
+    console.log("❌ Channel NOT FOUND. Check ID.");
+    return;
+  }
 
+  console.log("✅ Channel found:", channel.id);
+
+  // 📤 SEND ONLINE MESSAGE
+  channel.send("🟢 **BOT ONLINE (DEBUG MODE)**")
+    .then(() => console.log("✅ Online message sent"))
+    .catch(err => console.log("❌ Send failed:", err.message));
+
+  // 🔁 MAIN LOOP
   setInterval(async () => {
 
     let html;
     try {
       html = await fetchHTML(URL);
     } catch {
+      console.log("❌ Fetch failed");
       return;
     }
 
@@ -96,6 +116,7 @@ client.on("ready", async () => {
     try {
       players = extractPlayers(html);
     } catch {
+      console.log("❌ Parse failed");
       return;
     }
 
@@ -112,18 +133,18 @@ client.on("ready", async () => {
 
           if (prev < 30000 && curr >= 30000 && !triggered[id]) {
             triggered[id] = true;
-
             setTimeout(() => delete triggered[id], 60000);
 
-            channel.send(`<@&${JSR_ROLE_ID}> 🚨 ${p.name} hit ${curr}`);
+            channel.send(`<@&${JSR_ROLE_ID}> 🚨 ${p.name} hit ${curr}`)
+              .catch(err => console.log("Send error:", err.message));
           }
 
           if (prev < 80000 && curr >= 80000 && !triggered[id+"_80"]) {
             triggered[id+"_80"] = true;
-
             setTimeout(() => delete triggered[id+"_80"], 60000);
 
-            channel.send(`<@&${JSR_ROLE_ID}> 💀 ${p.name} hit ${curr}`);
+            channel.send(`<@&${JSR_ROLE_ID}> 💀 ${p.name} hit ${curr}`)
+              .catch(err => console.log("Send error:", err.message));
           }
         }
 
@@ -132,23 +153,23 @@ client.on("ready", async () => {
 
           if (prev < 20000 && curr >= 20000 && !triggered[id+"_20"]) {
             triggered[id+"_20"] = true;
-
             setTimeout(() => delete triggered[id+"_20"], 60000);
 
-            channel.send(`<@&${JSR_ROLE_ID}> 🛡️ ${p.name} hit ${curr}`);
+            channel.send(`<@&${JSR_ROLE_ID}> 🛡️ ${p.name} hit ${curr}`)
+              .catch(err => console.log("Send error:", err.message));
           }
 
           if (prev < 50000 && curr >= 50000 && !triggered[id+"_50"]) {
             triggered[id+"_50"] = true;
-
             setTimeout(() => delete triggered[id+"_50"], 60000);
 
-            channel.send(`<@&${JSR_ROLE_ID}> 🚨 ${p.name} hit ${curr}`);
+            channel.send(`<@&${JSR_ROLE_ID}> 🚨 ${p.name} hit ${curr}`)
+              .catch(err => console.log("Send error:", err.message));
           }
         }
 
       } catch (e) {
-        console.log("Send error:", e);
+        console.log("❌ Loop error:", e.message);
       }
 
       lastScores[id] = curr;
@@ -157,4 +178,7 @@ client.on("ready", async () => {
   }, INTERVAL);
 });
 
-client.login(TOKEN);
+// 🔐 LOGIN
+client.login(TOKEN).catch(err => {
+  console.log("❌ Login error:", err.message);
+});
