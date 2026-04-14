@@ -31,12 +31,12 @@ const jsr50 = new Set();
 let lastTopPlayer = null;
 let lastKingTime = 0;
 
-// 🧼 normalize names (prevents duplicate spam)
+// 🧼 normalize
 function normalizeName(name) {
   return name.replace(/\s+/g, "").toLowerCase();
 }
 
-// 🔍 detect JSR patterns
+// 🔍 JSR detect
 function isJSR(name) {
   const patterns = [
     "{ J S R }", "{JSR}", "{ JSR }",
@@ -47,18 +47,26 @@ function isJSR(name) {
   return patterns.some(p => lower.includes(p.toLowerCase()));
 }
 
-// 🌐 fetch HTML
+// 🌐 SAFE FETCH (timeout added)
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+
+    const req = https.get(url, (res) => {
       let data = "";
       res.on("data", chunk => data += chunk);
       res.on("end", () => resolve(data));
-    }).on("error", reject);
+    });
+
+    req.setTimeout(5000, () => {
+      req.destroy();
+      reject(new Error("Request timeout"));
+    });
+
+    req.on("error", reject);
   });
 }
 
-// 🎯 extract players (server 8828)
+// 🎯 parse only 8828
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -90,33 +98,26 @@ function extractPlayers(html) {
   return players;
 }
 
-client.once("ready", async () => {
-  console.log("Bot ready");
+// 🔒 anti-freeze loop control
+let isRunning = false;
 
-  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(() => null);
+async function runBot(channel, kingChannel) {
 
-  if (!channel || !kingChannel) return console.log("Channel error");
+  if (isRunning) return;
+  isRunning = true;
 
-  // 🟢 ONLINE MESSAGE
-  await channel.send("THE BOT IS ONLINE |").catch(() => {});
+  try {
 
-  // ⏱️ heartbeat (no spam)
-  setInterval(() => {
-    channel.send("🟢 BOT ACTIVE").catch(() => {});
-  }, 3 * 60 * 60 * 1000);
+    console.log("Loop running...");
 
-  setInterval(async () => {
+    let html = await fetchHTML(URL).catch(() => null);
+    if (!html) return;
 
-    let html;
-    try { html = await fetchHTML(URL); } catch { return; }
-
-    let players;
-    try { players = extractPlayers(html); } catch { return; }
+    let players = extractPlayers(html);
+    if (!players || players.length === 0) return;
 
     const currentNames = new Set(players.map(p => normalizeName(p.name)));
 
-    // 🧠 cleanup old players
     for (const name of [...activePlayers]) {
       if (!currentNames.has(name)) {
         alerted30.delete(name);
@@ -128,7 +129,7 @@ client.once("ready", async () => {
       }
     }
 
-    // 👑 KING SYSTEM (clean UI)
+    // 👑 KING
     let currentTop = players.reduce((a, b) => !a || b.score > a.score ? b : a, null);
 
     if (currentTop) {
@@ -167,7 +168,6 @@ client.once("ready", async () => {
 
       try {
 
-        // 🔴 ENEMY ALERTS
         if (!isJSR(p.name)) {
 
           if (prev < 30000 && curr >= 30000 && !alerted30.has(id)) {
@@ -212,10 +212,7 @@ client.once("ready", async () => {
             });
           }
 
-        }
-
-        // 🟢 JSR ALERTS
-        else {
+        } else {
 
           if (prev < 20000 && curr >= 20000 && !jsr20.has(id)) {
             jsr20.add(id);
@@ -268,6 +265,30 @@ client.once("ready", async () => {
       lastScores.set(id, curr);
     }
 
+  } catch (err) {
+    console.log("MAIN LOOP ERROR:", err?.message);
+  }
+
+  isRunning = false;
+}
+
+client.once("ready", async () => {
+  console.log("Bot ready");
+
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(() => null);
+
+  if (!channel || !kingChannel) return console.log("Channel error");
+
+  await channel.send("THE BOT IS ONLINE |").catch(() => {});
+
+  setInterval(() => {
+    channel.send("🟢 BOT ACTIVE").catch(() => {});
+  }, 3 * 60 * 60 * 1000);
+
+  // ✅ NEW SAFE LOOP
+  setInterval(() => {
+    runBot(channel, kingChannel);
   }, INTERVAL);
 });
 
