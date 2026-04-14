@@ -17,7 +17,7 @@ const KING_CHANNEL_ID = "1492009160920006666";
 const ROLE_ID = "1493480046986268803";
 
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 8000; // ✅ ONLY CHANGE
+const INTERVAL = 20000; // ✅ ONLY CHANGE (20 sec)
 
 // 🧠 tracking
 let activePlayers = new Set();
