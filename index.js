@@ -107,14 +107,10 @@ async function runBot(channel, kingChannel) {
   isRunning = true;
 
   try {
-    console.log("Loop running...");
-
     let html = await fetchHTML(URL).catch(() => null);
     if (!html) return;
 
     let players = extractPlayers(html);
-    console.log("Players found:", players.length);
-
     if (!players || players.length === 0) return;
 
     const currentNames = new Set(players.map(p => normalizeName(p.name)));
@@ -130,7 +126,7 @@ async function runBot(channel, kingChannel) {
       }
     }
 
-    // KING
+    // 👑 KING (UPDATED ONLY HERE)
     let currentTop = players.reduce((a, b) => !a || b.score > a.score ? b : a, null);
 
     if (currentTop) {
@@ -140,46 +136,128 @@ async function runBot(channel, kingChannel) {
         lastTopPlayer = currentTop.name;
         lastKingTime = now;
 
+        const isAlly = isJSR(currentTop.name);
+
         await kingChannel.send({
           embeds: [{
-            color: 0xffd700,
-            title: "👑 KING OF THE SERVER 👑",
+            color: isAlly ? 0x00ffcc : 0xffd700,
+            title: isAlly ? "🛡️ JSR KING 👑" : "👑 KING OF THE SERVER 👑",
             description:
-              `🐍 ${currentTop.name}\n📏 ${currentTop.score.toLocaleString()}`,
+              "━━━━━━━━━━━━━━━━━━\n" +
+              `${isAlly ? "🤝 **OUR PLAYER DOMINATING**" : "🔥 **DOMINATING PLAYER**"}\n\n` +
+              `🐍 **Name**   : ${currentTop.name}\n` +
+              `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
+              "⚔️ **STATUS**\n" +
+              `${isAlly ? "ALL PLAYERS HELP OUR PLAYER" : "ALL PLAYERS TARGET THIS KING"}\n` +
+              "━━━━━━━━━━━━━━━━━━",
+            footer: { text: "👑 JSR King Monitor" },
             timestamp: new Date(),
           }]
         }).catch(() => {});
       }
     }
 
-    // ALERTS
+    // ⚔️ ALERTS (UNCHANGED)
     for (const p of players) {
       const id = normalizeName(p.name);
       activePlayers.add(id);
 
-      const prev = lastScores.get(id) || 0;
       const curr = p.score;
 
-      if (!isJSR(p.name)) {
-        if (prev < 30000 && curr >= 30000 && !alerted30.has(id)) {
-          alerted30.add(id);
-          await channel.send(`<@&${ROLE_ID}> 🚨 ${p.name} → ${curr}`);
+      try {
+
+        if (!isJSR(p.name)) {
+
+          if (curr >= 30000 && !alerted30.has(id)) {
+            alerted30.add(id);
+
+            await channel.send({
+              content: `<@&${ROLE_ID}>`,
+              embeds: [{
+                color: 0xff2d2d,
+                title: "🚨 TARGET ACQUIRED",
+                description:
+                  "━━━━━━━━━━━━━━━━━━\n" +
+                  `🎯 ENEMY LOCKED\n\n` +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "⚔️ MISSION\n• Surround\n• Trap\n• Eliminate\n" +
+                  "━━━━━━━━━━━━━━━━━━",
+                footer: { text: "⚡ JSR Tactical System" },
+                timestamp: new Date(),
+              }]
+            });
+          }
+
+          if (curr >= 80000 && !alerted80.has(id)) {
+            alerted80.add(id);
+
+            await channel.send({
+              content: `<@&${ROLE_ID}>`,
+              embeds: [{
+                color: 0x990000,
+                title: "💀 ULTRA THREAT",
+                description:
+                  "━━━━━━━━━━━━━━━━━━\n" +
+                  `🔥 EXTREME TARGET\n\n` +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "🚨 GLOBAL ORDER\nALL PLAYERS → ATTACK NOW\n" +
+                  "━━━━━━━━━━━━━━━━━━",
+                footer: { text: "☠️ JSR War Protocol" },
+                timestamp: new Date(),
+              }]
+            });
+          }
+
+        } else {
+
+          if (curr >= 20000 && !jsr20.has(id)) {
+            jsr20.add(id);
+
+            await channel.send({
+              content: `<@&${ROLE_ID}>`,
+              embeds: [{
+                color: 0x00ffaa,
+                title: "🛡️ ALLY SUPPORT",
+                description:
+                  "━━━━━━━━━━━━━━━━━━\n" +
+                  `🤝 JSR MEMBER ACTIVE\n\n` +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "🟢 SUPPORT PLAN\n• Stay Close\n• Feed\n• Protect\n" +
+                  "━━━━━━━━━━━━━━━━━━",
+                footer: { text: "🛡️ JSR Support System" },
+                timestamp: new Date(),
+              }]
+            });
+          }
+
+          if (curr >= 50000 && !jsr50.has(id)) {
+            jsr50.add(id);
+
+            await channel.send({
+              content: `<@&${ROLE_ID}>`,
+              embeds: [{
+                color: 0x00cc66,
+                title: "🚨 CRITICAL ALLY",
+                description:
+                  "━━━━━━━━━━━━━━━━━━\n" +
+                  `⚠️ HIGH VALUE JSR\n\n` +
+                  `🐍 Name   : ${p.name}\n` +
+                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  "🔥 EMERGENCY ORDER\nDEFEND AT ALL COSTS\n" +
+                  "━━━━━━━━━━━━━━━━━━",
+                footer: { text: "⚡ JSR Emergency Protocol" },
+                timestamp: new Date(),
+              }]
+            });
+          }
+
         }
 
-        if (prev < 80000 && curr >= 80000 && !alerted80.has(id)) {
-          alerted80.add(id);
-          await channel.send(`<@&${ROLE_ID}> 💀 ${p.name} → ${curr}`);
-        }
-      } else {
-        if (prev < 20000 && curr >= 20000 && !jsr20.has(id)) {
-          jsr20.add(id);
-          await channel.send(`<@&${ROLE_ID}> 🛡️ ${p.name} → ${curr}`);
-        }
-
-        if (prev < 50000 && curr >= 50000 && !jsr50.has(id)) {
-          jsr50.add(id);
-          await channel.send(`<@&${ROLE_ID}> 🚨 JSR ${p.name} → ${curr}`);
-        }
+      } catch (err) {
+        console.log("Send error:", err?.message);
       }
 
       lastScores.set(id, curr);
@@ -192,13 +270,11 @@ async function runBot(channel, kingChannel) {
   isRunning = false;
 }
 
-client.once("ready", async () => {
-  console.log("Bot ready");
-
+client.once("clientReady", async () => {
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(() => null);
 
-  if (!channel || !kingChannel) return console.log("Channel error");
+  if (!channel || !kingChannel) return;
 
   await channel.send("THE BOT IS ONLINE |").catch(() => {});
 
