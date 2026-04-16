@@ -1,15 +1,11 @@
 {
-  "name": "jsr-alert-bot",
+  "name": "jsr-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": "18.x"
-  },
   "dependencies": {
-    "discord.js": "14.14.1",
-    "cheerio": "1.0.0-rc.12"
+    "discord.js": "^14.14.1"
   }
 }
