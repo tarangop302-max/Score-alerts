@@ -12,9 +12,9 @@ const client = new Client({
 
 // ✅ KEEP ALIVE
 http.createServer((req, res) => {
-  res.write("Bot is alive");
-  res.end();
-}).listen(3000);
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("JSR BOT RUNNING");
+}).listen(process.env.PORT || 3000);
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
@@ -35,6 +35,9 @@ const jsr50 = new Set();
 
 let lastTopPlayer = null;
 let lastKingTime = 0;
+
+// 🧠 restart-proof memory (temporary)
+let firstRun = true;
 
 function normalizeName(name) {
   return name.replace(/\s+/g, "").toLowerCase();
@@ -107,10 +110,14 @@ async function runBot(channel, kingChannel) {
   isRunning = true;
 
   try {
+    console.log("BOT LOOP ACTIVE", new Date().toLocaleTimeString());
+
     let html = await fetchHTML(URL).catch(() => null);
     if (!html) return;
 
     let players = extractPlayers(html);
+    console.log("Players found:", players.length);
+
     if (!players || players.length === 0) return;
 
     const currentNames = new Set(players.map(p => normalizeName(p.name)));
@@ -126,7 +133,7 @@ async function runBot(channel, kingChannel) {
       }
     }
 
-    // 👑 KING (UPDATED ONLY HERE)
+    // 👑 KING (JSR-aware)
     let currentTop = players.reduce((a, b) => !a || b.score > a.score ? b : a, null);
 
     if (currentTop) {
@@ -157,12 +164,18 @@ async function runBot(channel, kingChannel) {
       }
     }
 
-    // ⚔️ ALERTS (UNCHANGED)
+    // ⚔️ ALERTS (RESTART SAFE)
     for (const p of players) {
       const id = normalizeName(p.name);
       activePlayers.add(id);
 
       const curr = p.score;
+
+      // 🧠 On first run → store scores but DON'T alert
+      if (firstRun) {
+        lastScores.set(id, curr);
+        continue;
+      }
 
       try {
 
@@ -261,6 +274,12 @@ async function runBot(channel, kingChannel) {
       }
 
       lastScores.set(id, curr);
+    }
+
+    // ✅ after first loop
+    if (firstRun) {
+      console.log("First scan complete (no alerts sent)");
+      firstRun = false;
     }
 
   } catch (err) {
