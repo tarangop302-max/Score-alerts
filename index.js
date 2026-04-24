@@ -1,32 +1,31 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
-const http = require("http");
+const http = require("http"); // ✅ added
 
 // 🛡️ protection
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
+// 🔁 KEEP ALIVE (IMPORTANT)
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("BOT RUNNING");
+}).listen(process.env.PORT || 3000);
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-// ✅ KEEP ALIVE
-http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("JSR BOT RUNNING");
-}).listen(process.env.PORT || 3000);
-
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
-const ROLE_ID = "1493480046986268803";
 
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 20000;
+const INTERVAL = 20000; // ✅ changed to 20 sec (stable)
+const JSR_ROLE_ID = "1456546757893947598";
 
-// tracking
+// trackers
 let activePlayers = new Set();
-const lastScores = new Map();
 
 const alerted30 = new Set();
 const alerted80 = new Set();
@@ -36,24 +35,12 @@ const jsr50 = new Set();
 let lastTopPlayer = null;
 let lastKingTime = 0;
 
-// 🧠 restart-proof memory (temporary)
-let firstRun = true;
-
-function normalizeName(name) {
-  return name.replace(/\s+/g, "").toLowerCase();
-}
-
+// 🔍 detect JSR
 function isJSR(name) {
-  const patterns = [
-    "{ J S R }", "{JSR}", "{ JSR }",
-    "( J S R )", "(JSR)", "( JSR )",
-    "JSR"
-  ];
-  const lower = name.toLowerCase();
-  return patterns.some(p => lower.includes(p.toLowerCase()));
+  return name.includes("JSR");
 }
 
-// fetch
+// 🌐 fetch
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
@@ -71,7 +58,7 @@ function fetchHTML(url) {
   });
 }
 
-// parse
+// 🧠 parse ONLY 8828
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -103,24 +90,42 @@ function extractPlayers(html) {
   return players;
 }
 
-let isRunning = false;
+client.once("clientReady", async () => {
+  console.log("Bot ready");
 
-async function runBot(channel, kingChannel) {
-  if (isRunning) return;
-  isRunning = true;
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(() => null);
 
-  try {
-    console.log("BOT LOOP ACTIVE", new Date().toLocaleTimeString());
+  if (!channel || !kingChannel) return console.log("Channel error");
 
-    let html = await fetchHTML(URL).catch(() => null);
-    if (!html) return;
+  await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
 
-    let players = extractPlayers(html);
-    console.log("Players found:", players.length);
+  // 🔥 heartbeat
+  setInterval(() => {
+    channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
+  }, 3 * 60 * 60 * 1000);
+
+  // 🔁 loop
+  setInterval(async () => {
+
+    let html;
+    try {
+      html = await fetchHTML(URL);
+    } catch {
+      return;
+    }
+
+    let players;
+    try {
+      players = extractPlayers(html);
+    } catch {
+      return;
+    }
 
     if (!players || players.length === 0) return;
 
-    const currentNames = new Set(players.map(p => normalizeName(p.name)));
+    // 🧠 RESET SYSTEM
+    const currentNames = new Set(players.map(p => p.name));
 
     for (const name of [...activePlayers]) {
       if (!currentNames.has(name)) {
@@ -128,13 +133,17 @@ async function runBot(channel, kingChannel) {
         alerted80.delete(name);
         jsr20.delete(name);
         jsr50.delete(name);
-        lastScores.delete(name);
         activePlayers.delete(name);
       }
     }
 
-    // 👑 KING (JSR-aware)
-    let currentTop = players.reduce((a, b) => !a || b.score > a.score ? b : a, null);
+    // 👑 KING SYSTEM
+    let currentTop = null;
+    for (const p of players) {
+      if (!currentTop || p.score > currentTop.score) {
+        currentTop = p;
+      }
+    }
 
     if (currentTop) {
       const now = Date.now();
@@ -143,49 +152,37 @@ async function runBot(channel, kingChannel) {
         lastTopPlayer = currentTop.name;
         lastKingTime = now;
 
-        const isAlly = isJSR(currentTop.name);
+        const embed = {
+          color: 0xffd700,
+          title: "👑 KING OF THE SERVER 👑",
+          description:
+            "━━━━━━━━━━━━━━━━━━\n" +
+            `🔥 **DOMINATING PLAYER**\n\n` +
+            `🐍 **Name**   : ${currentTop.name}\n` +
+            `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
+            "⚔️ **STATUS**\n" +
+            "ALL PLAYERS TARGET THIS KING\n" +
+            "━━━━━━━━━━━━━━━━━━",
+          footer: { text: "👑 JSR King Monitor" },
+          timestamp: new Date(),
+        };
 
-        await kingChannel.send({
-          embeds: [{
-            color: isAlly ? 0x00ffcc : 0xffd700,
-            title: isAlly ? "🛡️ JSR KING 👑" : "👑 KING OF THE SERVER 👑",
-            description:
-              "━━━━━━━━━━━━━━━━━━\n" +
-              `${isAlly ? "🤝 **OUR PLAYER DOMINATING**" : "🔥 **DOMINATING PLAYER**"}\n\n` +
-              `🐍 **Name**   : ${currentTop.name}\n` +
-              `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
-              "⚔️ **STATUS**\n" +
-              `${isAlly ? "ALL PLAYERS HELP OUR PLAYER" : "ALL PLAYERS TARGET THIS KING"}\n` +
-              "━━━━━━━━━━━━━━━━━━",
-            footer: { text: "👑 JSR King Monitor" },
-            timestamp: new Date(),
-          }]
-        }).catch(() => {});
+        await kingChannel.send({ embeds: [embed] }).catch(() => {});
       }
     }
 
-    // ⚔️ ALERTS (RESTART SAFE)
+    // ⚔️ ALERT SYSTEM
     for (const p of players) {
-      const id = normalizeName(p.name);
-      activePlayers.add(id);
-
-      const curr = p.score;
-
-      // 🧠 On first run → store scores but DON'T alert
-      if (firstRun) {
-        lastScores.set(id, curr);
-        continue;
-      }
+      activePlayers.add(p.name);
 
       try {
 
         if (!isJSR(p.name)) {
 
-          if (curr >= 30000 && !alerted30.has(id)) {
-            alerted30.add(id);
+          if (p.score >= 30000 && !alerted30.has(p.name)) {
+            alerted30.add(p.name);
 
             await channel.send({
-              content: `<@&${ROLE_ID}>`,
               embeds: [{
                 color: 0xff2d2d,
                 title: "🚨 TARGET ACQUIRED",
@@ -193,7 +190,7 @@ async function runBot(channel, kingChannel) {
                   "━━━━━━━━━━━━━━━━━━\n" +
                   `🎯 ENEMY LOCKED\n\n` +
                   `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  `📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "⚔️ MISSION\n• Surround\n• Trap\n• Eliminate\n" +
                   "━━━━━━━━━━━━━━━━━━",
                 footer: { text: "⚡ JSR Tactical System" },
@@ -202,11 +199,10 @@ async function runBot(channel, kingChannel) {
             });
           }
 
-          if (curr >= 80000 && !alerted80.has(id)) {
-            alerted80.add(id);
+          if (p.score >= 80000 && !alerted80.has(p.name)) {
+            alerted80.add(p.name);
 
             await channel.send({
-              content: `<@&${ROLE_ID}>`,
               embeds: [{
                 color: 0x990000,
                 title: "💀 ULTRA THREAT",
@@ -214,7 +210,7 @@ async function runBot(channel, kingChannel) {
                   "━━━━━━━━━━━━━━━━━━\n" +
                   `🔥 EXTREME TARGET\n\n` +
                   `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  `📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "🚨 GLOBAL ORDER\nALL PLAYERS → ATTACK NOW\n" +
                   "━━━━━━━━━━━━━━━━━━",
                 footer: { text: "☠️ JSR War Protocol" },
@@ -225,19 +221,19 @@ async function runBot(channel, kingChannel) {
 
         } else {
 
-          if (curr >= 20000 && !jsr20.has(id)) {
-            jsr20.add(id);
+          if (p.score >= 20000 && !jsr20.has(p.name)) {
+            jsr20.add(p.name);
 
             await channel.send({
-              content: `<@&${ROLE_ID}>`,
+              content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
-                color: 0x00ffaa,
+                color: 0x00ffcc,
                 title: "🛡️ ALLY SUPPORT",
                 description:
                   "━━━━━━━━━━━━━━━━━━\n" +
                   `🤝 JSR MEMBER ACTIVE\n\n` +
                   `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  `📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "🟢 SUPPORT PLAN\n• Stay Close\n• Feed\n• Protect\n" +
                   "━━━━━━━━━━━━━━━━━━",
                 footer: { text: "🛡️ JSR Support System" },
@@ -246,11 +242,11 @@ async function runBot(channel, kingChannel) {
             });
           }
 
-          if (curr >= 50000 && !jsr50.has(id)) {
-            jsr50.add(id);
+          if (p.score >= 50000 && !jsr50.has(p.name)) {
+            jsr50.add(p.name);
 
             await channel.send({
-              content: `<@&${ROLE_ID}>`,
+              content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
                 color: 0x00cc66,
                 title: "🚨 CRITICAL ALLY",
@@ -258,7 +254,7 @@ async function runBot(channel, kingChannel) {
                   "━━━━━━━━━━━━━━━━━━\n" +
                   `⚠️ HIGH VALUE JSR\n\n` +
                   `🐍 Name   : ${p.name}\n` +
-                  `📏 Length : ${curr.toLocaleString()}\n\n` +
+                  `📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "🔥 EMERGENCY ORDER\nDEFEND AT ALL COSTS\n" +
                   "━━━━━━━━━━━━━━━━━━",
                 footer: { text: "⚡ JSR Emergency Protocol" },
@@ -272,33 +268,8 @@ async function runBot(channel, kingChannel) {
       } catch (err) {
         console.log("Send error:", err?.message);
       }
-
-      lastScores.set(id, curr);
     }
 
-    // ✅ after first loop
-    if (firstRun) {
-      console.log("First scan complete (no alerts sent)");
-      firstRun = false;
-    }
-
-  } catch (err) {
-    console.log("ERROR:", err?.message);
-  }
-
-  isRunning = false;
-}
-
-client.once("clientReady", async () => {
-  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(() => null);
-
-  if (!channel || !kingChannel) return;
-
-  await channel.send("THE BOT IS ONLINE |").catch(() => {});
-
-  setInterval(() => {
-    runBot(channel, kingChannel);
   }, INTERVAL);
 });
 
