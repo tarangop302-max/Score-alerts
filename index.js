@@ -272,5 +272,5 @@ client.once("clientReady", async () => {
 
   }, INTERVAL);
 });
-
+console.log("TOKEN VALUE:", process.env.DISCORD_BOT_TOKEN);
 client.login(TOKEN);
