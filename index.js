@@ -1,16 +1,19 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
-const http = require("http"); // ✅ added
+const http = require("http");
 
 // 🛡️ protection
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
-// 🔁 KEEP ALIVE (IMPORTANT)
+// 🔁 KEEP ALIVE (for Railway)
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("BOT RUNNING");
 }).listen(process.env.PORT || 3000);
+
+// 🔍 DEBUG (IMPORTANT)
+console.log("TOKEN LENGTH:", process.env.DISCORD_BOT_TOKEN?.length);
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
@@ -21,12 +24,11 @@ const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
 
 const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 20000; // ✅ changed to 20 sec (stable)
+const INTERVAL = 20000; // ⚡ stable (20 sec)
 const JSR_ROLE_ID = "1456546757893947598";
 
 // trackers
 let activePlayers = new Set();
-
 const alerted30 = new Set();
 const alerted80 = new Set();
 const jsr20 = new Set();
@@ -58,7 +60,7 @@ function fetchHTML(url) {
   });
 }
 
-// 🧠 parse ONLY 8828
+// 🧠 parse
 function extractPlayers(html) {
   const players = [];
   const tables = html.split("<table");
@@ -90,6 +92,7 @@ function extractPlayers(html) {
   return players;
 }
 
+// 🚀 READY
 client.once("clientReady", async () => {
   console.log("Bot ready");
 
@@ -100,12 +103,12 @@ client.once("clientReady", async () => {
 
   await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
 
-  // 🔥 heartbeat
+  // heartbeat
   setInterval(() => {
     channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
   }, 3 * 60 * 60 * 1000);
 
-  // 🔁 loop
+  // 🔁 main loop
   setInterval(async () => {
 
     let html;
@@ -122,9 +125,8 @@ client.once("clientReady", async () => {
       return;
     }
 
-    if (!players || players.length === 0) return;
+    if (!players.length) return;
 
-    // 🧠 RESET SYSTEM
     const currentNames = new Set(players.map(p => p.name));
 
     for (const name of [...activePlayers]) {
@@ -137,12 +139,10 @@ client.once("clientReady", async () => {
       }
     }
 
-    // 👑 KING SYSTEM
+    // 👑 KING
     let currentTop = null;
     for (const p of players) {
-      if (!currentTop || p.score > currentTop.score) {
-        currentTop = p;
-      }
+      if (!currentTop || p.score > currentTop.score) currentTop = p;
     }
 
     if (currentTop) {
@@ -152,26 +152,26 @@ client.once("clientReady", async () => {
         lastTopPlayer = currentTop.name;
         lastKingTime = now;
 
-        const embed = {
-          color: 0xffd700,
-          title: "👑 KING OF THE SERVER 👑",
-          description:
-            "━━━━━━━━━━━━━━━━━━\n" +
-            `🔥 **DOMINATING PLAYER**\n\n` +
-            `🐍 **Name**   : ${currentTop.name}\n` +
-            `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
-            "⚔️ **STATUS**\n" +
-            "ALL PLAYERS TARGET THIS KING\n" +
-            "━━━━━━━━━━━━━━━━━━",
-          footer: { text: "👑 JSR King Monitor" },
-          timestamp: new Date(),
-        };
-
-        await kingChannel.send({ embeds: [embed] }).catch(() => {});
+        await kingChannel.send({
+          embeds: [{
+            color: 0xffd700,
+            title: "👑 KING OF THE SERVER 👑",
+            description:
+              "━━━━━━━━━━━━━━━━━━\n" +
+              `🔥 **DOMINATING PLAYER**\n\n` +
+              `🐍 **Name**   : ${currentTop.name}\n` +
+              `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
+              "⚔️ **STATUS**\n" +
+              "ALL PLAYERS TARGET THIS KING\n" +
+              "━━━━━━━━━━━━━━━━━━",
+            footer: { text: "👑 JSR King Monitor" },
+            timestamp: new Date(),
+          }]
+        }).catch(() => {});
       }
     }
 
-    // ⚔️ ALERT SYSTEM
+    // ⚔️ ALERTS
     for (const p of players) {
       activePlayers.add(p.name);
 
