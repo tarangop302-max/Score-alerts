@@ -2,88 +2,78 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
 const http = require("http");
 
-// 🛡️ protection
+// 🛡️ Protection
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
-// 🔁 KEEP ALIVE (for Railway)
+// 🔁 KEEP ALIVE — Render needs a web server to stay alive
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("BOT RUNNING");
-}).listen(process.env.PORT || 3000);
+}).listen(process.env.PORT || 3000, () => {
+  console.log("✅ Keep-alive server running on port", process.env.PORT || 3000);
+});
 
-// 🔍 DEBUG (IMPORTANT)
+// 🔍 Debug
 console.log("TOKEN LENGTH:", process.env.DISCORD_BOT_TOKEN?.length);
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-const TOKEN = process.env.DISCORD_BOT_TOKEN;
-const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
+const TOKEN          = process.env.DISCORD_BOT_TOKEN;
+const CHANNEL_ID     = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
+const JSR_ROLE_ID    = "1456546757893947598";
 
-const URL = "https://ntl-slither.com/ss/";
-const INTERVAL = 20000; // ⚡ stable (20 sec)
-const JSR_ROLE_ID = "1456546757893947598";
+const URL      = "https://ntl-slither.com/ss/";
+const INTERVAL = 20000; // 20 seconds
 
-// trackers
+// Trackers
 let activePlayers = new Set();
 const alerted30 = new Set();
 const alerted80 = new Set();
-const jsr20 = new Set();
-const jsr50 = new Set();
+const jsr20     = new Set();
+const jsr50     = new Set();
 
 let lastTopPlayer = null;
-let lastKingTime = 0;
+let lastKingTime  = 0;
 
-// 🔍 detect JSR
 function isJSR(name) {
   return name.includes("JSR");
 }
 
-// 🌐 fetch
+// 🌐 Fetch HTML
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, (res) => {
+    const req = https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
       let data = "";
       res.on("data", chunk => data += chunk);
       res.on("end", () => resolve(data));
     });
-
-    req.setTimeout(5000, () => {
-      req.destroy();
-      reject(new Error("Timeout"));
-    });
-
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error("Timeout")); });
     req.on("error", reject);
   });
 }
 
-// 🧠 parse
+// 🧠 Parse players from HTML
 function extractPlayers(html) {
   const players = [];
-  const tables = html.split("<table");
+  const tables  = html.split("<table");
 
   for (const table of tables) {
     if (!table.includes("8828") || !table.includes("- IN")) continue;
 
     const rows = table.split("<tr");
-
     for (const row of rows) {
       const cols = row.split("<td");
-
       if (cols.length >= 4) {
-        const nameMatch = cols[2].match(/>(.*?)</);
+        const nameMatch  = cols[2].match(/>(.*?)</);
         const scoreMatch = cols[3].match(/>(.*?)</);
-
         if (nameMatch && scoreMatch) {
-          const name = nameMatch[1].trim();
+          const name  = nameMatch[1].trim();
           const score = parseInt(scoreMatch[1].replace(/,/g, ""), 10);
-
-          if (!isNaN(score)) {
-            players.push({ name, score });
-          }
+          if (name && !isNaN(score)) players.push({ name, score });
         }
       }
     }
@@ -92,43 +82,43 @@ function extractPlayers(html) {
   return players;
 }
 
-// 🚀 READY
-client.once("clientReady", async () => {
-  console.log("Bot ready");
+// 🚀 Bot Ready
+client.once("ready", async () => {
+  console.log(`✅ Bot ready: ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+  const channel     = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(() => null);
 
-  if (!channel || !kingChannel) return console.log("Channel error");
+  if (!channel)     return console.log("❌ CHANNEL_ID not found. Check your env variable.");
+  if (!kingChannel) return console.log("❌ KING_CHANNEL_ID not found.");
 
   await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
 
-  // heartbeat
+  // Heartbeat every 3 hours
   setInterval(() => {
     channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
   }, 3 * 60 * 60 * 1000);
 
-  // 🔁 main loop
+  // 🔁 Main loop
   setInterval(async () => {
 
     let html;
-    try {
-      html = await fetchHTML(URL);
-    } catch {
-      return;
-    }
+    try { html = await fetchHTML(URL); }
+    catch (e) { console.log("Fetch error:", e.message); return; }
 
     let players;
-    try {
-      players = extractPlayers(html);
-    } catch {
+    try { players = extractPlayers(html); }
+    catch (e) { console.log("Parse error:", e.message); return; }
+
+    if (!players.length) {
+      console.log("⚠️ No players found for server 8828.");
       return;
     }
 
-    if (!players.length) return;
+    console.log(`📊 Found ${players.length} players on 8828`);
 
+    // Clean up players who left
     const currentNames = new Set(players.map(p => p.name));
-
     for (const name of [...activePlayers]) {
       if (!currentNames.has(name)) {
         alerted30.delete(name);
@@ -139,18 +129,14 @@ client.once("clientReady", async () => {
       }
     }
 
-    // 👑 KING
-    let currentTop = null;
-    for (const p of players) {
-      if (!currentTop || p.score > currentTop.score) currentTop = p;
-    }
+    // 👑 King alert
+    const currentTop = players.reduce((a, b) => b.score > a.score ? b : a, players[0]);
 
     if (currentTop) {
       const now = Date.now();
-
       if (currentTop.name !== lastTopPlayer && now - lastKingTime > 120000) {
         lastTopPlayer = currentTop.name;
-        lastKingTime = now;
+        lastKingTime  = now;
 
         await kingChannel.send({
           embeds: [{
@@ -161,27 +147,24 @@ client.once("clientReady", async () => {
               `🔥 **DOMINATING PLAYER**\n\n` +
               `🐍 **Name**   : ${currentTop.name}\n` +
               `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
-              "⚔️ **STATUS**\n" +
-              "ALL PLAYERS TARGET THIS KING\n" +
+              "⚔️ **STATUS**\nALL PLAYERS TARGET THIS KING\n" +
               "━━━━━━━━━━━━━━━━━━",
             footer: { text: "👑 JSR King Monitor" },
             timestamp: new Date(),
           }]
-        }).catch(() => {});
+        }).catch(e => console.log("King send error:", e.message));
       }
     }
 
-    // ⚔️ ALERTS
+    // ⚔️ Player alerts
     for (const p of players) {
       activePlayers.add(p.name);
 
       try {
-
         if (!isJSR(p.name)) {
 
           if (p.score >= 30000 && !alerted30.has(p.name)) {
             alerted30.add(p.name);
-
             await channel.send({
               embeds: [{
                 color: 0xff2d2d,
@@ -201,7 +184,6 @@ client.once("clientReady", async () => {
 
           if (p.score >= 80000 && !alerted80.has(p.name)) {
             alerted80.add(p.name);
-
             await channel.send({
               embeds: [{
                 color: 0x990000,
@@ -223,7 +205,6 @@ client.once("clientReady", async () => {
 
           if (p.score >= 20000 && !jsr20.has(p.name)) {
             jsr20.add(p.name);
-
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -244,7 +225,6 @@ client.once("clientReady", async () => {
 
           if (p.score >= 50000 && !jsr50.has(p.name)) {
             jsr50.add(p.name);
-
             await channel.send({
               content: `<@&${JSR_ROLE_ID}>`,
               embeds: [{
@@ -264,7 +244,6 @@ client.once("clientReady", async () => {
           }
 
         }
-
       } catch (err) {
         console.log("Send error:", err?.message);
       }
@@ -272,5 +251,5 @@ client.once("clientReady", async () => {
 
   }, INTERVAL);
 });
-console.log("TOKEN VALUE:", process.env.DISCORD_BOT_TOKEN);
+
 client.login(TOKEN);
