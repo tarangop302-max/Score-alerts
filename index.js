@@ -6,11 +6,7 @@ const http = require("http");
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
-// ════════════════════════════════════════
-// 🔁 KEEP ALIVE SERVER — Required for Railway
-// Railway will kill any app with no web traffic
-// This HTTP server receives pings from UptimeRobot
-// ════════════════════════════════════════
+// 🔁 KEEP ALIVE SERVER
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
@@ -19,7 +15,6 @@ http.createServer((req, res) => {
   console.log(`✅ Keep-alive server running on port ${PORT}`);
 });
 
-// 🔍 Debug token
 console.log("TOKEN LENGTH:", process.env.DISCORD_BOT_TOKEN?.length);
 
 const client = new Client({
@@ -29,10 +24,10 @@ const client = new Client({
 const TOKEN           = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID      = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
-const JSR_ROLE_ID     = "1456546757893947598";
+const ALERT_ROLE      = "<@&1493480046986268803>";  // Single role for ALL alerts
 
 const NTL_URL  = "https://ntl-slither.com/ss/";
-const INTERVAL = 20000; // 20 seconds
+const INTERVAL = 20000;
 
 // Trackers
 let activePlayers = new Set();
@@ -48,7 +43,6 @@ function isJSR(name) {
   return name.includes("JSR");
 }
 
-// 🌐 Fetch HTML from NTL
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
@@ -57,7 +51,6 @@ function fetchHTML(url) {
         "Accept": "text/html,application/xhtml+xml",
       }
     }, (res) => {
-      // Handle redirects
       if (res.statusCode === 301 || res.statusCode === 302) {
         return fetchHTML(res.headers.location).then(resolve).catch(reject);
       }
@@ -70,7 +63,6 @@ function fetchHTML(url) {
   });
 }
 
-// 🧠 Parse players from HTML table
 function extractPlayers(html) {
   const players = [];
   const tables  = html.split("<table");
@@ -98,7 +90,6 @@ function extractPlayers(html) {
   return players;
 }
 
-// 🚀 Bot Ready
 client.once("ready", async () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);
 
@@ -117,13 +108,13 @@ client.once("ready", async () => {
   await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
   console.log("✅ Startup message sent!");
 
-  // Heartbeat every 3 hours so Railway knows bot is alive
+  // Heartbeat every 3 hours
   setInterval(() => {
     channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
     console.log("💓 Heartbeat sent");
   }, 3 * 60 * 60 * 1000);
 
-  // 🔁 Main leaderboard loop
+  // 🔁 Main loop
   setInterval(async () => {
 
     let html;
@@ -143,7 +134,7 @@ client.once("ready", async () => {
     }
 
     if (!players.length) {
-      console.log("⚠️ No players found for server 8828 — site may have changed.");
+      console.log("⚠️ No players found for server 8828.");
       return;
     }
 
@@ -200,6 +191,7 @@ client.once("ready", async () => {
             alerted30.add(p.name);
             console.log(`🚨 Enemy alert: ${p.name} (${p.score})`);
             await channel.send({
+              content: ALERT_ROLE,
               embeds: [{
                 color: 0xff2d2d,
                 title: "🚨 TARGET ACQUIRED",
@@ -220,6 +212,7 @@ client.once("ready", async () => {
             alerted80.add(p.name);
             console.log(`💀 Ultra threat: ${p.name} (${p.score})`);
             await channel.send({
+              content: ALERT_ROLE,
               embeds: [{
                 color: 0x990000,
                 title: "💀 ULTRA THREAT",
@@ -242,7 +235,7 @@ client.once("ready", async () => {
             jsr20.add(p.name);
             console.log(`🛡️ JSR ally: ${p.name} (${p.score})`);
             await channel.send({
-              content: `<@&${JSR_ROLE_ID}>`,
+              content: ALERT_ROLE,
               embeds: [{
                 color: 0x00ffcc,
                 title: "🛡️ ALLY SUPPORT",
@@ -263,7 +256,7 @@ client.once("ready", async () => {
             jsr50.add(p.name);
             console.log(`🚨 Critical JSR: ${p.name} (${p.score})`);
             await channel.send({
-              content: `<@&${JSR_ROLE_ID}>`,
+              content: ALERT_ROLE,
               embeds: [{
                 color: 0x00cc66,
                 title: "🚨 CRITICAL ALLY",
