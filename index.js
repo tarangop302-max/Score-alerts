@@ -40,7 +40,35 @@ let lastTopPlayer = null;
 let lastKingTime  = 0;
 
 function isJSR(name) {
-  return name.includes("JSR");
+  // Normalize: lowercase and remove all spaces
+  const n = name.toLowerCase().replace(/\s+/g, "");
+
+  // Covers all bracket types, spacings, cases
+  const patterns = [
+    "jsr",       // JSR, Jsr, jsr, jSr (anywhere in name)
+    "{jsr}",     // {JSR}, { JSR }, {Jsr}, { J S R }
+    "[jsr]",     // [JSR], [ JSR ], [Jsr], [ J S R ]
+    "(jsr)",     // (JSR), ( JSR ), (Jsr), ( J S R )
+    "<jsr>",     // <JSR>, < JSR >
+    "|jsr|",     // |JSR|, | JSR |
+    "-jsr-",     // -JSR-
+    ".jsr.",     // .JSR.
+    "_jsr_",     // _JSR_
+    "~jsr~",     // ~JSR~
+    "«jsr»",     // «JSR»
+    "jsr.",      // JSR.name
+    ".jsr",      // .JSR
+    "jsr_",      // JSR_name
+    "_jsr",      // _JSR
+    "jsr-",      // JSR-name
+    "-jsr",      // -JSR
+    "jsr/",      // JSR/
+    "/jsr",      // /JSR
+    "jsr#",      // JSR#
+    "#jsr",      // #JSR
+  ];
+
+  return patterns.some(p => n.includes(p));
 }
 
 function fetchHTML(url) {
