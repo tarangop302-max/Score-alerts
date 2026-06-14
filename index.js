@@ -106,7 +106,7 @@ function buildLeaderboardEmbed(players, totalPlayers) {
 
   const totalScore = players.reduce((sum, p) => sum + p.score, 0);
   const now = new Date();
-  const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" }) + " IST";
 
   let board = "";
   top10.forEach((p, i) => {
