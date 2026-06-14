@@ -194,9 +194,8 @@ client.once("ready", async () => {
     }
   }
 
-  // Run immediately then every 1 minute
+  // Run once immediately on startup
   await updateLeaderboard();
-  setInterval(updateLeaderboard, BOARD_INTERVAL);
 
   // ──────────────────────────────────────
   // ⚔️ ALERTS — checks every 20 seconds
@@ -214,6 +213,21 @@ client.once("ready", async () => {
     if (!players.length) { console.log("⚠️ No players found."); return; }
 
     console.log(`📊 ${new Date().toLocaleTimeString()} — Found ${players.length} players on 8828`);
+
+    // 🏆 Update leaderboard every time players are found
+    try {
+      const embed = buildLeaderboardEmbed(players, players.length);
+      if (leaderboardMessage) {
+        await leaderboardMessage.edit({ embeds: [embed] });
+        console.log(`🏆 Leaderboard updated — ${new Date().toLocaleTimeString()}`);
+      } else {
+        leaderboardMessage = await kingChannel.send({ embeds: [embed] });
+        console.log("🏆 Leaderboard message created!");
+      }
+    } catch (e) {
+      console.log("❌ Leaderboard error:", e.message);
+      leaderboardMessage = null;
+    }
 
     // Clean up players who left
     const currentNames = new Set(players.map(p => p.name));
