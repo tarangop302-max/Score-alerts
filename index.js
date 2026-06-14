@@ -87,8 +87,8 @@ function extractPlayers(html) {
         if (nameMatch && scoreMatch) {
           const name  = nameMatch[1].trim();
           const score = parseInt(scoreMatch[1].replace(/,/g, ""), 10);
-          if (name && !isNaN(score) && score > 0) {
-            players.push({ name, score });
+          if (!isNaN(score) && score > 0) {
+            players.push({ name: name || "(no name)", score });
           }
         }
       }
