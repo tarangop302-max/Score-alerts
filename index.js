@@ -28,7 +28,7 @@ const ALERT_ROLE      = "<@&1493480046986268803>";
 
 const NTL_URL          = "https://ntl-slither.com/ss/";
 const ALERT_INTERVAL   = 20000;       // 20 seconds for alerts
-const BOARD_INTERVAL   = 60000;       // 1 minute for leaderboard refresh
+const BOARD_INTERVAL   = 20000;       // 20 seconds for freshest data       // 1 minute for leaderboard refresh
 
 // Trackers
 let activePlayers = new Set();
@@ -102,46 +102,47 @@ function extractPlayers(html) {
 // 🏆 Build leaderboard embed
 function buildLeaderboardEmbed(players, totalPlayers) {
   const top10 = players.slice(0, 10);
-  const medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 
   const totalScore = players.reduce((sum, p) => sum + p.score, 0);
   const now = new Date();
-  const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" }) + " IST";
+
+  const dateStr = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
 
   let board = "";
   top10.forEach((p, i) => {
     const jsrTag = isJSR(p.name) ? " 🛡️" : "";
-    board += `${medals[i]} **${p.name}**${jsrTag}\n┗ 📏 \`${p.score.toLocaleString()}\`\n\n`;
+    board += `#${i + 1} **${p.name}**${jsrTag} — ${p.score.toLocaleString()}\n`;
   });
 
   return {
     color: 0x7b2fff,
     author: {
-      name: "🇮🇳 Slither Server 8828 — India",
+      name: "🇮🇳 Slither Server 8828",
     },
     title: "🐍 Leaderboard (Top 10)",
     description: board,
     fields: [
       {
         name: "💯 Total Score",
-        value: `\`${totalScore.toLocaleString()}\``,
+        value: totalScore.toLocaleString(),
         inline: true,
       },
       {
-        name: "👥 Players Online",
-        value: `\`${totalPlayers}\``,
+        name: "👥 Players",
+        value: String(totalPlayers),
         inline: true,
       },
       {
-        name: "🕐 Last Updated",
-        value: `\`${timeStr}\``,
+        name: "🕐 Updated",
+        value: "Just now",
         inline: true,
       },
     ],
-    footer: { text: "🔁 Refreshes every 1 minute  •  🛡️ = JSR Ally  •  Powered by JSR Gaming" },
-    timestamp: new Date(),
+    footer: { text: `Powered by JSR Gaming  •  Last Refresh | ${dateStr} ${timeStr}` },
   };
 }
+
 
 client.once("ready", async () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);
