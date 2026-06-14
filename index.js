@@ -24,10 +24,11 @@ const client = new Client({
 const TOKEN           = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID      = process.env.DISCORD_CHANNEL_ID;
 const KING_CHANNEL_ID = "1492009160920006666";
-const ALERT_ROLE      = "<@&1493480046986268803>";  // Single role for ALL alerts
+const ALERT_ROLE      = "<@&1493480046986268803>";
 
-const NTL_URL  = "https://ntl-slither.com/ss/";
-const INTERVAL = 20000;
+const NTL_URL          = "https://ntl-slither.com/ss/";
+const ALERT_INTERVAL   = 20000;       // 20 seconds for alerts
+const BOARD_INTERVAL   = 60000;       // 1 minute for leaderboard refresh
 
 // Trackers
 let activePlayers = new Set();
@@ -36,38 +37,17 @@ const alerted80   = new Set();
 const jsr20       = new Set();
 const jsr50       = new Set();
 
-let lastTopPlayer = null;
-let lastKingTime  = 0;
+// Leaderboard message reference
+let leaderboardMessage = null;
 
 function isJSR(name) {
-  // Normalize: lowercase and remove all spaces
   const n = name.toLowerCase().replace(/\s+/g, "");
-
-  // Covers all bracket types, spacings, cases
   const patterns = [
-    "jsr",       // JSR, Jsr, jsr, jSr (anywhere in name)
-    "{jsr}",     // {JSR}, { JSR }, {Jsr}, { J S R }
-    "[jsr]",     // [JSR], [ JSR ], [Jsr], [ J S R ]
-    "(jsr)",     // (JSR), ( JSR ), (Jsr), ( J S R )
-    "<jsr>",     // <JSR>, < JSR >
-    "|jsr|",     // |JSR|, | JSR |
-    "-jsr-",     // -JSR-
-    ".jsr.",     // .JSR.
-    "_jsr_",     // _JSR_
-    "~jsr~",     // ~JSR~
-    "«jsr»",     // «JSR»
-    "jsr.",      // JSR.name
-    ".jsr",      // .JSR
-    "jsr_",      // JSR_name
-    "_jsr",      // _JSR
-    "jsr-",      // JSR-name
-    "-jsr",      // -JSR
-    "jsr/",      // JSR/
-    "/jsr",      // /JSR
-    "jsr#",      // JSR#
-    "#jsr",      // #JSR
+    "jsr", "{jsr}", "[jsr]", "(jsr)", "<jsr>", "|jsr|",
+    "-jsr-", ".jsr.", "_jsr_", "~jsr~", "«jsr»",
+    "jsr.", ".jsr", "jsr_", "_jsr", "jsr-", "-jsr",
+    "jsr/", "/jsr", "jsr#", "#jsr",
   ];
-
   return patterns.some(p => n.includes(p));
 }
 
@@ -115,7 +95,52 @@ function extractPlayers(html) {
     }
   }
 
-  return players;
+  // Sort by score descending
+  return players.sort((a, b) => b.score - a.score);
+}
+
+// 🏆 Build leaderboard embed
+function buildLeaderboardEmbed(players, totalPlayers) {
+  const top10 = players.slice(0, 10);
+  const medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+
+  const totalScore = players.reduce((sum, p) => sum + p.score, 0);
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  let board = "";
+  top10.forEach((p, i) => {
+    const jsrTag = isJSR(p.name) ? " 🛡️" : "";
+    board += `${medals[i]} **${p.name}**${jsrTag}\n┗ 📏 \`${p.score.toLocaleString()}\`\n\n`;
+  });
+
+  return {
+    color: 0x7b2fff,
+    author: {
+      name: "🇮🇳 Slither Server 8828 — India",
+    },
+    title: "🐍 Leaderboard (Top 10)",
+    description: board,
+    fields: [
+      {
+        name: "💯 Total Score",
+        value: `\`${totalScore.toLocaleString()}\``,
+        inline: true,
+      },
+      {
+        name: "👥 Players Online",
+        value: `\`${totalPlayers}\``,
+        inline: true,
+      },
+      {
+        name: "🕐 Last Updated",
+        value: `\`${timeStr}\``,
+        inline: true,
+      },
+    ],
+    footer: { text: "🔁 Refreshes every 1 minute  •  🛡️ = JSR Ally  •  Powered by JSR Gaming" },
+    timestamp: new Date(),
+  };
 }
 
 client.once("ready", async () => {
@@ -142,29 +167,50 @@ client.once("ready", async () => {
     console.log("💓 Heartbeat sent");
   }, 3 * 60 * 60 * 1000);
 
-  // 🔁 Main loop
+  // ──────────────────────────────────────
+  // 🏆 LEADERBOARD — updates every 1 min
+  // ──────────────────────────────────────
+  async function updateLeaderboard() {
+    try {
+      const html    = await fetchHTML(NTL_URL);
+      const players = extractPlayers(html);
+      if (!players.length) return;
+
+      const embed = buildLeaderboardEmbed(players, players.length);
+
+      if (leaderboardMessage) {
+        // Edit existing message
+        await leaderboardMessage.edit({ embeds: [embed] });
+        console.log(`🏆 Leaderboard updated — ${new Date().toLocaleTimeString()}`);
+      } else {
+        // Send fresh message and save reference
+        leaderboardMessage = await kingChannel.send({ embeds: [embed] });
+        console.log("🏆 Leaderboard message created!");
+      }
+    } catch (e) {
+      console.log("❌ Leaderboard error:", e.message);
+      leaderboardMessage = null; // reset so it tries to send again
+    }
+  }
+
+  // Run immediately then every 1 minute
+  await updateLeaderboard();
+  setInterval(updateLeaderboard, BOARD_INTERVAL);
+
+  // ──────────────────────────────────────
+  // ⚔️ ALERTS — checks every 20 seconds
+  // ──────────────────────────────────────
   setInterval(async () => {
 
     let html;
-    try {
-      html = await fetchHTML(NTL_URL);
-    } catch (e) {
-      console.log("❌ Fetch error:", e.message);
-      return;
-    }
+    try { html = await fetchHTML(NTL_URL); }
+    catch (e) { console.log("❌ Fetch error:", e.message); return; }
 
     let players;
-    try {
-      players = extractPlayers(html);
-    } catch (e) {
-      console.log("❌ Parse error:", e.message);
-      return;
-    }
+    try { players = extractPlayers(html); }
+    catch (e) { console.log("❌ Parse error:", e.message); return; }
 
-    if (!players.length) {
-      console.log("⚠️ No players found for server 8828.");
-      return;
-    }
+    if (!players.length) { console.log("⚠️ No players found."); return; }
 
     console.log(`📊 ${new Date().toLocaleTimeString()} — Found ${players.length} players on 8828`);
 
@@ -177,34 +223,6 @@ client.once("ready", async () => {
         jsr20.delete(name);
         jsr50.delete(name);
         activePlayers.delete(name);
-      }
-    }
-
-    // 👑 King alert
-    const currentTop = players.reduce((a, b) => b.score > a.score ? b : a, players[0]);
-
-    if (currentTop) {
-      const now = Date.now();
-      if (currentTop.name !== lastTopPlayer && now - lastKingTime > 120000) {
-        lastTopPlayer = currentTop.name;
-        lastKingTime  = now;
-        console.log(`👑 New King: ${currentTop.name} (${currentTop.score})`);
-
-        await kingChannel.send({
-          embeds: [{
-            color: 0xffd700,
-            title: "👑 KING OF THE SERVER 👑",
-            description:
-              "━━━━━━━━━━━━━━━━━━\n" +
-              `🔥 **DOMINATING PLAYER**\n\n` +
-              `🐍 **Name**   : ${currentTop.name}\n` +
-              `📏 **Length** : ${currentTop.score.toLocaleString()}\n\n` +
-              "⚔️ **STATUS**\nALL PLAYERS TARGET THIS KING\n" +
-              "━━━━━━━━━━━━━━━━━━",
-            footer: { text: "👑 JSR King Monitor" },
-            timestamp: new Date(),
-          }]
-        }).catch(e => console.log("King send error:", e.message));
       }
     }
 
@@ -307,7 +325,7 @@ client.once("ready", async () => {
       }
     }
 
-  }, INTERVAL);
+  }, ALERT_INTERVAL);
 });
 
 client.login(TOKEN);
