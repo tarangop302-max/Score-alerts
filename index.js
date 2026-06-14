@@ -23,7 +23,7 @@ const client = new Client({
 
 const TOKEN           = process.env.DISCORD_BOT_TOKEN;
 const CHANNEL_ID      = process.env.DISCORD_CHANNEL_ID;
-const KING_CHANNEL_ID = process.env.KING_CHANNEL_ID;
+const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 
 const NTL_URL          = "https://ntl-slither.com/ss/";
