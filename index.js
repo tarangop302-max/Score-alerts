@@ -40,15 +40,64 @@ const jsr50       = new Set();
 // Leaderboard message reference
 let leaderboardMessage = null;
 
-function isJSR(name) {
-  const n = name.toLowerCase().replace(/\s+/g, "");
-  const patterns = [
-    "jsr", "{jsr}", "[jsr]", "(jsr)", "<jsr>", "|jsr|",
-    "-jsr-", ".jsr.", "_jsr_", "~jsr~", "«jsr»",
-    "jsr.", ".jsr", "jsr_", "_jsr", "jsr-", "-jsr",
-    "jsr/", "/jsr", "jsr#", "#jsr",
+// ──────────────────────────────────────
+// 🏷️ TEAM DETECTION
+// ──────────────────────────────────────
+// Wrapper patterns applied to every team tag, e.g. for "JSR":
+// "jsr", "{jsr}", "[jsr]", "(jsr)", "<jsr>", "|jsr|", "-jsr-", ".jsr.",
+// "_jsr_", "~jsr~", "«jsr»", "jsr.", ".jsr", "jsr_", "_jsr",
+// "jsr-", "-jsr", "jsr/", "/jsr", "jsr#", "#jsr"
+function buildPatterns(tag) {
+  const t = tag.toLowerCase();
+  return [
+    t, `{${t}}`, `[${t}]`, `(${t})`, `<${t}>`, `|${t}|`,
+    `-${t}-`, `.${t}.`, `_${t}_`, `~${t}~`, `«${t}»`,
+    `${t}.`, `.${t}`, `${t}_`, `_${t}`, `${t}-`, `-${t}`,
+    `${t}/`, `/${t}`, `${t}#`, `#${t}`,
   ];
-  return patterns.some(p => n.includes(p));
+}
+
+const TEAMS = {
+  JSR:  { patterns: buildPatterns("jsr"),  emoji: "🟠", color: 0xff8c00 },
+  SMT:  { patterns: buildPatterns("smt"),  emoji: "🔵", color: 0x3399ff },
+  DINO: { patterns: buildPatterns("dino"), emoji: "🔴", color: 0xff0000 },
+  LWK:  { patterns: buildPatterns("lwk"),  emoji: "🟡", color: 0xffd700 },
+  IND:  { patterns: buildPatterns("ind"),  emoji: "🟢", color: 0x00cc44 },
+};
+
+function normalizeName(name) {
+  return name.toLowerCase().replace(/\s+/g, "");
+}
+
+// Returns the team key ("JSR", "SMT", etc.) or null if no team matched
+function detectTeam(name) {
+  const n = normalizeName(name);
+  for (const [key, team] of Object.entries(TEAMS)) {
+    if (team.patterns.some(p => n.includes(p))) return key;
+  }
+  return null;
+}
+
+function isJSR(name) {
+  return detectTeam(name) === "JSR";
+}
+
+// Decode common HTML entities that leak through from scraped HTML
+function decodeEntities(str) {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+// Truncate long names so the leaderboard line never overflows/wraps badly
+function truncateName(name, max = 22) {
+  if (name.length <= max) return name;
+  return name.slice(0, max - 1) + "…";
 }
 
 function fetchHTML(url) {
@@ -85,7 +134,7 @@ function extractPlayers(html) {
         const nameMatch  = cols[2].match(/>(.*?)</);
         const scoreMatch = cols[3].match(/>(.*?)</);
         if (nameMatch && scoreMatch) {
-          const name  = nameMatch[1].trim();
+          const name  = decodeEntities(nameMatch[1].trim());
           const score = parseInt(scoreMatch[1].replace(/,/g, ""), 10);
           if (!isNaN(score) && score > 0) {
             players.push({ name: name || "(no name)", score });
@@ -109,10 +158,15 @@ function buildLeaderboardEmbed(players, totalPlayers) {
   const dateStr = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
   const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
 
+  const RANK_ICONS = ["🥇", "🥈", "🥉"];
+
   let board = "";
   top10.forEach((p, i) => {
-    const jsrTag = isJSR(p.name) ? " 🛡️" : "";
-    board += `#${i + 1} **${p.name}**${jsrTag} — ${p.score.toLocaleString()}\n`;
+    const rankIcon = RANK_ICONS[i] || `#${i + 1}`;
+    const team     = detectTeam(p.name);
+    const teamTag  = team ? `${TEAMS[team].emoji} ` : "";
+    const safeName = truncateName(p.name);
+    board += `${rankIcon} ${teamTag}**${safeName}** — ${p.score.toLocaleString()}\n`;
   });
 
   return {
@@ -137,6 +191,11 @@ function buildLeaderboardEmbed(players, totalPlayers) {
         name: "🕐 Updated",
         value: "Just now",
         inline: true,
+      },
+      {
+        name: "🏷️ Teams",
+        value: "🟠 JSR  🔵 SMT  🔴 DINO  🟡 LWK  🟢 IND",
+        inline: false,
       },
     ],
     footer: { text: `Powered by JSR Gaming  •  Last Refresh | ${dateStr} ${timeStr}` },
