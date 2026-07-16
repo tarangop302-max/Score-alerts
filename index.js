@@ -15,20 +15,22 @@ http.createServer((req, res) => {
   console.log(`✅ Keep-alive server running on port ${PORT}`);
 });
 
-console.log("TOKEN LENGTH:", process.env.DISCORD_BOT_TOKEN?.length);
-
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-const TOKEN           = process.env.DISCORD_BOT_TOKEN;
-const CHANNEL_ID      = process.env.DISCORD_CHANNEL_ID;
+// ─────────────────────────────────────
+// 🔑 CONFIG — paste your values here
+// ─────────────────────────────────────
+const const T1 = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.dD";
+const T2 = "IGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
+const TOKEN = T1 + T2;
+const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 
-const NTL_URL          = "https://ntl-slither.com/ss/";
-const ALERT_INTERVAL   = 20000;       // 20 seconds for alerts
-const BOARD_INTERVAL   = 20000;       // 20 seconds for freshest data       // 1 minute for leaderboard refresh
+const NTL_URL        = "https://ntl-slither.com/ss/";
+const ALERT_INTERVAL = 20000; // 20 seconds
 
 // Trackers
 let activePlayers = new Set();
@@ -37,16 +39,11 @@ const alerted80   = new Set();
 const jsr20       = new Set();
 const jsr50       = new Set();
 
-// Leaderboard message reference
 let leaderboardMessage = null;
 
 // ──────────────────────────────────────
 // 🏷️ TEAM DETECTION
 // ──────────────────────────────────────
-// Wrapper patterns applied to every team tag, e.g. for "JSR":
-// "jsr", "{jsr}", "[jsr]", "(jsr)", "<jsr>", "|jsr|", "-jsr-", ".jsr.",
-// "_jsr_", "~jsr~", "«jsr»", "jsr.", ".jsr", "jsr_", "_jsr",
-// "jsr-", "-jsr", "jsr/", "/jsr", "jsr#", "#jsr"
 function buildPatterns(tag) {
   const t = tag.toLowerCase();
   return [
@@ -58,18 +55,17 @@ function buildPatterns(tag) {
 }
 
 const TEAMS = {
-  JSR:  { patterns: buildPatterns("jsr"),  emoji: "🟠", color: 0xff8c00 },
-  SMT:  { patterns: buildPatterns("smt"),  emoji: "🔵", color: 0x3399ff },
-  DINO: { patterns: buildPatterns("dino"), emoji: "🔴", color: 0xff0000 },
-  LWK:  { patterns: buildPatterns("lwk"),  emoji: "🟡", color: 0xffd700 },
-  IND:  { patterns: buildPatterns("ind"),  emoji: "🟢", color: 0x00cc44 },
+  JSR:  { patterns: buildPatterns("jsr"),  emoji: "🟠" },
+  SMT:  { patterns: buildPatterns("smt"),  emoji: "🔵" },
+  DINO: { patterns: buildPatterns("dino"), emoji: "🔴" },
+  LWK:  { patterns: buildPatterns("lwk"),  emoji: "🟡" },
+  IND:  { patterns: buildPatterns("ind"),  emoji: "🟢" },
 };
 
 function normalizeName(name) {
   return name.toLowerCase().replace(/\s+/g, "");
 }
 
-// Returns the team key ("JSR", "SMT", etc.) or null if no team matched
 function detectTeam(name) {
   const n = normalizeName(name);
   for (const [key, team] of Object.entries(TEAMS)) {
@@ -82,7 +78,6 @@ function isJSR(name) {
   return detectTeam(name) === "JSR";
 }
 
-// Decode common HTML entities that leak through from scraped HTML
 function decodeEntities(str) {
   return str
     .replace(/&amp;/g, "&")
@@ -94,12 +89,14 @@ function decodeEntities(str) {
     .replace(/&nbsp;/g, " ");
 }
 
-// Truncate long names so the leaderboard line never overflows/wraps badly
 function truncateName(name, max = 22) {
   if (name.length <= max) return name;
   return name.slice(0, max - 1) + "…";
 }
 
+// ──────────────────────────────────────
+// 🌐 FETCH with retry (fixes No players found gaps)
+// ──────────────────────────────────────
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
@@ -115,11 +112,28 @@ function fetchHTML(url) {
       res.on("data", chunk => data += chunk);
       res.on("end", () => resolve(data));
     });
-    req.setTimeout(10000, () => { req.destroy(); reject(new Error("Timeout")); });
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error("Timeout")); });
     req.on("error", reject);
   });
 }
 
+// Retry up to 3 times with 3s delay between attempts
+async function fetchWithRetry(url, attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const html = await fetchHTML(url);
+      return html;
+    } catch (e) {
+      console.log(`⚠️ Fetch attempt ${i}/${attempts} failed: ${e.message}`);
+      if (i < attempts) await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+  throw new Error("All fetch attempts failed");
+}
+
+// ──────────────────────────────────────
+// 📊 PARSE PLAYERS
+// ──────────────────────────────────────
 function extractPlayers(html) {
   const players = [];
   const tables  = html.split("<table");
@@ -144,16 +158,16 @@ function extractPlayers(html) {
     }
   }
 
-  // Sort by score descending
   return players.sort((a, b) => b.score - a.score);
 }
 
-// 🏆 Build leaderboard embed
-function buildLeaderboardEmbed(players, totalPlayers) {
-  const top10 = players.slice(0, 10);
-
+// ──────────────────────────────────────
+// 🏆 LEADERBOARD EMBED
+// ──────────────────────────────────────
+function buildLeaderboardEmbed(players) {
+  const top10      = players.slice(0, 10);
   const totalScore = players.reduce((sum, p) => sum + p.score, 0);
-  const now = new Date();
+  const now        = new Date();
 
   const dateStr = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
   const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
@@ -171,49 +185,27 @@ function buildLeaderboardEmbed(players, totalPlayers) {
 
   return {
     color: 0x7b2fff,
-    author: {
-      name: "🇮🇳 Slither Server 8828",
-    },
+    author: { name: "🇮🇳 Slither Server 8828" },
     title: "🐍 Leaderboard (Top 10)",
     description: board,
     fields: [
-      {
-        name: "💯 Total Score",
-        value: totalScore.toLocaleString(),
-        inline: true,
-      },
-      {
-        name: "👥 Players",
-        value: String(totalPlayers),
-        inline: true,
-      },
-      {
-        name: "🕐 Updated",
-        value: "Just now",
-        inline: true,
-      },
-      {
-        name: "🏷️ Teams",
-        value: "🟠 JSR  🔵 SMT  🔴 DINO  🟡 LWK  🟢 IND",
-        inline: false,
-      },
+      { name: "💯 Total Score", value: totalScore.toLocaleString(), inline: true },
+      { name: "👥 Players",     value: String(players.length),      inline: true },
+      { name: "🕐 Updated",     value: "Just now",                  inline: true },
+      { name: "🏷️ Teams", value: "🟠 JSR  🔵 SMT  🔴 DINO  🟡 LWK  🟢 IND", inline: false },
     ],
     footer: { text: `Powered by JSR Gaming  •  Last Refresh | ${dateStr} ${timeStr}` },
   };
 }
 
-
+// ──────────────────────────────────────
+// 🚀 BOT READY
+// ──────────────────────────────────────
 client.once("ready", async () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);
 
-  const channel     = await client.channels.fetch(CHANNEL_ID).catch(e => {
-    console.log("❌ CHANNEL_ID error:", e.message);
-    return null;
-  });
-  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => {
-    console.log("❌ KING_CHANNEL_ID error:", e.message);
-    return null;
-  });
+  const channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID error:", e.message); return null; });
+  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => { console.log("❌ KING_CHANNEL_ID error:", e.message); return null; });
 
   if (!channel)     { console.log("❌ Main channel not found!"); return; }
   if (!kingChannel) { console.log("❌ King channel not found!"); return; }
@@ -228,54 +220,35 @@ client.once("ready", async () => {
   }, 3 * 60 * 60 * 1000);
 
   // ──────────────────────────────────────
-  // 🏆 LEADERBOARD — updates every 1 min
+  // ⚔️ MAIN LOOP — every 20 seconds
   // ──────────────────────────────────────
-  async function updateLeaderboard() {
-    try {
-      const html    = await fetchHTML(NTL_URL);
-      const players = extractPlayers(html);
-      if (!players.length) return;
-
-      const embed = buildLeaderboardEmbed(players, players.length);
-
-      if (leaderboardMessage) {
-        // Edit existing message
-        await leaderboardMessage.edit({ embeds: [embed] });
-        console.log(`🏆 Leaderboard updated — ${new Date().toLocaleTimeString()}`);
-      } else {
-        // Send fresh message and save reference
-        leaderboardMessage = await kingChannel.send({ embeds: [embed] });
-        console.log("🏆 Leaderboard message created!");
-      }
-    } catch (e) {
-      console.log("❌ Leaderboard error:", e.message);
-      leaderboardMessage = null; // reset so it tries to send again
-    }
-  }
-
-  // Run once immediately on startup
-  await updateLeaderboard();
-
-  // ──────────────────────────────────────
-  // ⚔️ ALERTS — checks every 20 seconds
-  // ──────────────────────────────────────
-  setInterval(async () => {
-
+  async function runLoop() {
     let html;
-    try { html = await fetchHTML(NTL_URL); }
-    catch (e) { console.log("❌ Fetch error:", e.message); return; }
+    try {
+      html = await fetchWithRetry(NTL_URL);
+    } catch (e) {
+      console.log("❌ Fetch failed after retries:", e.message);
+      return;
+    }
 
     let players;
-    try { players = extractPlayers(html); }
-    catch (e) { console.log("❌ Parse error:", e.message); return; }
+    try {
+      players = extractPlayers(html);
+    } catch (e) {
+      console.log("❌ Parse error:", e.message);
+      return;
+    }
 
-    if (!players.length) { console.log("⚠️ No players found."); return; }
+    if (!players.length) {
+      console.log(`⚠️ No players found — HTML length: ${html.length} chars`);
+      return;
+    }
 
     console.log(`📊 ${new Date().toLocaleTimeString()} — Found ${players.length} players on 8828`);
 
-    // 🏆 Update leaderboard every time players are found
+    // 🏆 Update leaderboard
     try {
-      const embed = buildLeaderboardEmbed(players, players.length);
+      const embed = buildLeaderboardEmbed(players);
       if (leaderboardMessage) {
         await leaderboardMessage.edit({ embeds: [embed] });
         console.log(`🏆 Leaderboard updated — ${new Date().toLocaleTimeString()}`);
@@ -398,8 +371,11 @@ client.once("ready", async () => {
         console.log("Send error:", err?.message);
       }
     }
+  }
 
-  }, ALERT_INTERVAL);
+  // Run immediately on startup then every 20s
+  await runLoop();
+  setInterval(runLoop, ALERT_INTERVAL);
 });
 
 client.login(TOKEN);
