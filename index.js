@@ -22,7 +22,7 @@ const client = new Client({
 // ─────────────────────────────────────
 // 🔑 CONFIG — paste your values here
 // ─────────────────────────────────────
-const const T1 = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.dD";
+const T1 = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.dD";
 const T2 = "IGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
 const TOKEN = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
