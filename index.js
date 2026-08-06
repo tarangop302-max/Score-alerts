@@ -2,40 +2,34 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
 const http = require("http");
 
-// 🛡️ Protection
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
-// 🔁 KEEP ALIVE SERVER
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("JSR BOT IS ALIVE ✅");
-}).listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Keep-alive server running on port ${PORT}`);
-});
+}).listen(PORT, "0.0.0.0", () => console.log(`✅ Keep-alive server on port ${PORT}`));
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // ─────────────────────────────────────
-// 🔑 CONFIG — paste your values here
+// 🔑 CONFIG
 // ─────────────────────────────────────
-const T1            = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.dD";
-const T2            = "IGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
-const TOKEN         = T1 + T2;
-const CHANNEL_ID    = "1490713616813523004";
+const T1              = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.dD";
+const T2              = "IGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
+const TOKEN           = T1 + T2;
+const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
-const ALERT_ROLE    = "<@&1493480046986268803>";
+const ALERT_ROLE      = "<@&1493480046986268803>";
+const NTL_URL         = "https://ntl-slither.com/ss/";
+const ALERT_INTERVAL  = 20000;
 
-const NTL_URL        = "https://ntl-slither.com/ss/";
-const ALERT_INTERVAL = 20000;
-
-// Trackers
-let activePlayers = new Set();
-const alerted30   = new Set();
-const alerted80   = new Set();
-const jsr20       = new Set();
-const jsr50       = new Set();
+let activePlayers    = new Set();
+const alerted30      = new Set();
+const alerted80      = new Set();
+const jsr20          = new Set();
+const jsr50          = new Set();
 let leaderboardMessage = null;
 
 // ──────────────────────────────────────
@@ -59,9 +53,7 @@ const TEAMS = {
   IND:  { patterns: buildPatterns("ind"),  emoji: "🟢" },
 };
 
-function normalizeName(name) {
-  return name.toLowerCase().replace(/\s+/g, "");
-}
+function normalizeName(name) { return name.toLowerCase().replace(/\s+/g, ""); }
 
 function detectTeam(name) {
   const n = normalizeName(name);
@@ -109,9 +101,8 @@ function fetchHTML(url) {
 
 async function fetchWithRetry(url, attempts = 3) {
   for (let i = 1; i <= attempts; i++) {
-    try {
-      return await fetchHTML(url);
-    } catch (e) {
+    try { return await fetchHTML(url); }
+    catch (e) {
       console.log(`⚠️ Fetch attempt ${i}/${attempts} failed: ${e.message}`);
       if (i < attempts) await new Promise(r => setTimeout(r, 3000));
     }
@@ -120,84 +111,77 @@ async function fetchWithRetry(url, attempts = 3) {
 }
 
 // ──────────────────────────────────────
-// 📊 PARSE PLAYERS (updated for new site format)
+// 📊 PARSE PLAYERS
 // ──────────────────────────────────────
 function extractPlayers(html) {
-  html = decodeEntities(html);
+  // Step 1: strip HTML tags first (before decoding entities)
+  // so that special chars in names (&gt; &lt;) stay encoded until after tag removal
+  const stripped = html.replace(/<[^>]+>/g, " ");
 
-  // Find server 8828 (IN server)
+  // Step 2: decode entities
+  const decoded = decodeEntities(stripped);
+
+  // Step 3: find server 8828 (IN server)
   let idx = -1;
   for (const p of ["8828148.113", "8828\u00a0", "8828 "]) {
-    idx = html.indexOf(p);
+    idx = decoded.indexOf(p);
     if (idx !== -1) break;
   }
-  // Fallback: any "8828" near "IN"
   if (idx === -1) {
     let pos = 0;
     while (true) {
-      const i = html.indexOf("8828", pos);
+      const i = decoded.indexOf("8828", pos);
       if (i === -1) break;
-      if (html.substring(i, i + 500).includes("IN")) { idx = i; break; }
+      if (decoded.substring(i, i + 600).includes("IN")) { idx = i; break; }
       pos = i + 1;
     }
   }
-  if (idx === -1) { console.log("⚠️ Server 8828 not found in HTML"); return []; }
+  if (idx === -1) { console.log("⚠️ Server 8828 not found"); return []; }
 
-  // Find player data line (after "Server time:" line)
-  const serverTimeIdx = html.indexOf("Server time:", idx);
-  if (serverTimeIdx === -1) return [];
-  const lineStart = html.indexOf("\n", serverTimeIdx) + 1;
+  const section = decoded.substring(idx, idx + 3000);
 
-  // Find end of player data
-  let lineEnd = html.length;
-  for (const marker of ["Total Score", "Updated:", "![map"]) {
-    const pos = html.indexOf(marker, lineStart);
-    if (pos !== -1 && pos < lineEnd) lineEnd = pos;
-  }
-
-  const playerData = html.substring(lineStart, lineEnd).replace(/\s+/g, " ").trim();
-
-  if (!playerData || !playerData.includes("#")) {
+  // Step 4: find player data starting with "1# "
+  const playerStart = section.indexOf("1# ");
+  if (playerStart === -1) {
     console.log(`⚠️ No player data found. HTML length: ${html.length}`);
     return [];
   }
 
-  // Parse players sequentially by rank (1-10)
-  // Format: "1# name<score>2# name<score>..." all concatenated
+  // Step 5: find end of player data
+  let playerEnd = section.length;
+  for (const marker of ["Total Score", "Updated:"]) {
+    const pos = section.indexOf(marker, playerStart + 10);
+    if (pos !== -1 && pos < playerEnd) playerEnd = pos;
+  }
+
+  const playerData = section.substring(playerStart, playerEnd).replace(/\s+/g, " ").trim();
+
+  // Step 6: parse each player sequentially (rank 1 to 10)
   const players = [];
   let remaining = playerData;
 
   for (let rank = 1; rank <= 10; rank++) {
-    // Strip current rank prefix
     const prefix    = rank + "# ";
     const altPrefix = rank + "#";
-    if (remaining.startsWith(prefix))    remaining = remaining.substring(prefix.length);
+    if (remaining.startsWith(prefix))         remaining = remaining.substring(prefix.length);
     else if (remaining.startsWith(altPrefix)) remaining = remaining.substring(altPrefix.length);
 
     const nextRank = rank + 1;
     let chunk;
-
     if (nextRank <= 10) {
       const pos = remaining.indexOf(nextRank + "#");
-      if (pos === -1) {
-        chunk     = remaining.trim();
-        remaining = "";
-      } else {
-        chunk     = remaining.substring(0, pos).trim();
-        remaining = remaining.substring(pos);
-      }
+      if (pos === -1) { chunk = remaining.trim(); remaining = ""; }
+      else { chunk = remaining.substring(0, pos).trim(); remaining = remaining.substring(pos); }
     } else {
       chunk = remaining.trim();
     }
 
-    // Score = trailing digits (3-7 digits) of chunk
     const scoreMatch = chunk.match(/(\d{3,7})\s*$/);
     if (scoreMatch) {
       const score = parseInt(scoreMatch[1], 10);
       const name  = chunk.substring(0, chunk.length - scoreMatch[0].length).trim() || "(no name)";
       if (score > 100) players.push({ name, score });
     }
-
     if (!remaining) break;
   }
 
@@ -253,19 +237,15 @@ client.once("ready", async () => {
   await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
   console.log("✅ Startup message sent!");
 
-  // Heartbeat every 3 hours
   setInterval(() => {
     channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
     console.log("💓 Heartbeat sent");
   }, 3 * 60 * 60 * 1000);
 
-  // ──────────────────────────────────────
-  // ⚔️ MAIN LOOP — every 20 seconds
-  // ──────────────────────────────────────
   async function runLoop() {
     let html;
     try { html = await fetchWithRetry(NTL_URL); }
-    catch (e) { console.log("❌ Fetch failed after retries:", e.message); return; }
+    catch (e) { console.log("❌ Fetch failed:", e.message); return; }
 
     let players;
     try { players = extractPlayers(html); }
@@ -273,9 +253,9 @@ client.once("ready", async () => {
 
     if (!players.length) return;
 
-    console.log(`📊 ${new Date().toLocaleTimeString()} — Found ${players.length} players on 8828`);
+    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players on 8828`);
 
-    // 🏆 Update leaderboard
+    // Update leaderboard
     try {
       const embed = buildLeaderboardEmbed(players);
       if (leaderboardMessage) {
@@ -283,14 +263,14 @@ client.once("ready", async () => {
         console.log(`🏆 Leaderboard updated — ${new Date().toLocaleTimeString()}`);
       } else {
         leaderboardMessage = await kingChannel.send({ embeds: [embed] });
-        console.log("🏆 Leaderboard message created!");
+        console.log("🏆 Leaderboard created!");
       }
     } catch (e) {
       console.log("❌ Leaderboard error:", e.message);
       leaderboardMessage = null;
     }
 
-    // Clean up players who left
+    // Clean up left players
     const currentNames = new Set(players.map(p => p.name));
     for (const name of [...activePlayers]) {
       if (!currentNames.has(name)) {
@@ -300,25 +280,22 @@ client.once("ready", async () => {
       }
     }
 
-    // ⚔️ Player alerts
+    // Alerts
     for (const p of players) {
       activePlayers.add(p.name);
       try {
         if (!isJSR(p.name)) {
           if (p.score >= 30000 && !alerted30.has(p.name)) {
             alerted30.add(p.name);
-            console.log(`🚨 Enemy alert: ${p.name} (${p.score})`);
+            console.log(`🚨 Enemy: ${p.name} (${p.score})`);
             await channel.send({
               content: ALERT_ROLE,
               embeds: [{
-                color: 0xff2d2d,
-                title: "🚨 TARGET ACQUIRED",
-                description:
-                  "━━━━━━━━━━━━━━━━━━\n🎯 ENEMY LOCKED\n\n" +
+                color: 0xff2d2d, title: "🚨 TARGET ACQUIRED",
+                description: "━━━━━━━━━━━━━━━━━━\n🎯 ENEMY LOCKED\n\n" +
                   `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "⚔️ MISSION\n• Surround\n• Trap\n• Eliminate\n━━━━━━━━━━━━━━━━━━",
-                footer: { text: "⚡ JSR Tactical System" },
-                timestamp: new Date(),
+                footer: { text: "⚡ JSR Tactical System" }, timestamp: new Date(),
               }]
             });
           }
@@ -328,14 +305,11 @@ client.once("ready", async () => {
             await channel.send({
               content: ALERT_ROLE,
               embeds: [{
-                color: 0x990000,
-                title: "💀 ULTRA THREAT",
-                description:
-                  "━━━━━━━━━━━━━━━━━━\n🔥 EXTREME TARGET\n\n" +
+                color: 0x990000, title: "💀 ULTRA THREAT",
+                description: "━━━━━━━━━━━━━━━━━━\n🔥 EXTREME TARGET\n\n" +
                   `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "🚨 GLOBAL ORDER\nALL PLAYERS → ATTACK NOW\n━━━━━━━━━━━━━━━━━━",
-                footer: { text: "☠️ JSR War Protocol" },
-                timestamp: new Date(),
+                footer: { text: "☠️ JSR War Protocol" }, timestamp: new Date(),
               }]
             });
           }
@@ -346,14 +320,11 @@ client.once("ready", async () => {
             await channel.send({
               content: ALERT_ROLE,
               embeds: [{
-                color: 0x00ffcc,
-                title: "🛡️ ALLY SUPPORT",
-                description:
-                  "━━━━━━━━━━━━━━━━━━\n🤝 JSR MEMBER ACTIVE\n\n" +
+                color: 0x00ffcc, title: "🛡️ ALLY SUPPORT",
+                description: "━━━━━━━━━━━━━━━━━━\n🤝 JSR MEMBER ACTIVE\n\n" +
                   `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "🟢 SUPPORT PLAN\n• Stay Close\n• Feed\n• Protect\n━━━━━━━━━━━━━━━━━━",
-                footer: { text: "🛡️ JSR Support System" },
-                timestamp: new Date(),
+                footer: { text: "🛡️ JSR Support System" }, timestamp: new Date(),
               }]
             });
           }
@@ -363,21 +334,16 @@ client.once("ready", async () => {
             await channel.send({
               content: ALERT_ROLE,
               embeds: [{
-                color: 0x00cc66,
-                title: "🚨 CRITICAL ALLY",
-                description:
-                  "━━━━━━━━━━━━━━━━━━\n⚠️ HIGH VALUE JSR\n\n" +
+                color: 0x00cc66, title: "🚨 CRITICAL ALLY",
+                description: "━━━━━━━━━━━━━━━━━━\n⚠️ HIGH VALUE JSR\n\n" +
                   `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
                   "🔥 EMERGENCY ORDER\nDEFEND AT ALL COSTS\n━━━━━━━━━━━━━━━━━━",
-                footer: { text: "⚡ JSR Emergency Protocol" },
-                timestamp: new Date(),
+                footer: { text: "⚡ JSR Emergency Protocol" }, timestamp: new Date(),
               }]
             });
           }
         }
-      } catch (err) {
-        console.log("Send error:", err?.message);
-      }
+      } catch (err) { console.log("Send error:", err?.message); }
     }
   }
 
