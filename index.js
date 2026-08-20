@@ -69,7 +69,7 @@ function decodeEntities(str) {
   return str
     .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'").replace(/&nbsp;/g, " ");
+    .replace(/&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&nbsp/g, " ");
 }
 
 function truncateName(name, max = 22) {
@@ -77,14 +77,21 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 FETCH with retry
+// 🌐 FETCH — realistic browser headers
 // ──────────────────────────────────────
 function fetchHTML(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Accept-Encoding": "identity",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Referer": "https://ntl-slither.com/",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
       }
     }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302) {
@@ -114,56 +121,41 @@ async function fetchWithRetry(url, attempts = 3) {
 // 📊 PARSE PLAYERS
 // ──────────────────────────────────────
 function extractPlayers(html) {
-  // Find 8828 IN server BEFORE stripping tags
-  // Look for "8828" in raw HTML (may be inside a span tag)
-  // The raw HTML pattern: <span...>8828</span>148.113...IN
-  // or just: 8828148.113...IN
-  // Find the index of "8828" that is near "IN"
+  // Find server 8828 in raw HTML
   let idx = -1;
   let searchPos = 0;
   while (true) {
     const i = html.indexOf("8828", searchPos);
     if (i === -1) break;
-    // Check if "IN" appears within 500 chars after this "8828"
-    if (html.substring(i, i + 500).includes("IN")) {
-      idx = i;
-      break;
-    }
+    if (html.substring(i, i + 600).includes("IN")) { idx = i; break; }
     searchPos = i + 1;
   }
 
   if (idx === -1) {
-    console.log("⚠️ Server 8828 not found");
+    console.log(`⚠️ Server 8828 not found. HTML length: ${html.length}. First 300 chars: ${html.substring(0, 300)}`);
     return [];
   }
 
-  // Get a chunk of HTML from 8828 onwards (enough for all player data)
   const chunk = html.substring(idx, idx + 4000);
 
-  // Find "1# " inside this chunk - the start of player data
+  // Find "1# " — start of player data
   const playerStart = chunk.indexOf("1# ");
   if (playerStart === -1) {
-    console.log(`⚠️ No player data found. HTML length: ${html.length}`);
+    console.log(`⚠️ No player data (1#) found near 8828`);
     return [];
   }
 
-  // Find end of player data - look for "Total Score" or next server block
+  // Find end of player data
   let playerEnd = chunk.length;
   for (const marker of ["Total Score", "Updated:"]) {
     const pos = chunk.indexOf(marker, playerStart + 10);
     if (pos !== -1 && pos < playerEnd) playerEnd = pos;
   }
 
-  // Extract just the player data string and clean it up
+  // Clean up: strip HTML tags, decode entities, collapse whitespace
   let playerData = chunk.substring(playerStart, playerEnd);
-
-  // Remove HTML tags (but do this AFTER locating the section to avoid issues with names like "<")
   playerData = playerData.replace(/<[^>]+>/g, " ");
-
-  // Decode entities
   playerData = decodeEntities(playerData);
-
-  // Collapse whitespace
   playerData = playerData.replace(/\s+/g, " ").trim();
 
   if (!playerData || !playerData.includes("#")) {
@@ -171,12 +163,11 @@ function extractPlayers(html) {
     return [];
   }
 
-  // Parse each player sequentially by rank (1 to 10)
+  // Parse each rank sequentially (1 to 10)
   const players = [];
   let remaining = playerData;
 
   for (let rank = 1; rank <= 10; rank++) {
-    // Strip current rank prefix
     const prefix    = rank + "# ";
     const altPrefix = rank + "#";
     if (remaining.startsWith(prefix))         remaining = remaining.substring(prefix.length);
@@ -192,7 +183,6 @@ function extractPlayers(html) {
       chunkStr = remaining.trim();
     }
 
-    // Score = trailing digits (3-7 digits)
     const scoreMatch = chunkStr.match(/(\d{3,7})\s*$/);
     if (scoreMatch) {
       const score = parseInt(scoreMatch[1], 10);
@@ -272,7 +262,6 @@ client.once("ready", async () => {
 
     console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players on 8828`);
 
-    // Update leaderboard
     try {
       const embed = buildLeaderboardEmbed(players);
       if (leaderboardMessage) {
@@ -287,7 +276,6 @@ client.once("ready", async () => {
       leaderboardMessage = null;
     }
 
-    // Clean up left players
     const currentNames = new Set(players.map(p => p.name));
     for (const name of [...activePlayers]) {
       if (!currentNames.has(name)) {
@@ -297,7 +285,6 @@ client.once("ready", async () => {
       }
     }
 
-    // Alerts
     for (const p of players) {
       activePlayers.add(p.name);
       try {
