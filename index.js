@@ -22,7 +22,7 @@ const TOKEN           = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
-const NTL_URL         = "https://ntl-slither.com/ss/";
+const NTL_URL         = "https://ntl-slither.com/ss/rs.php";
 const ALERT_INTERVAL  = 20000;
 
 let activePlayers    = new Set();
