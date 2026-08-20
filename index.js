@@ -16,10 +16,10 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 // ─────────────────────────────────────
 // 🔑 CONFIG
 // ─────────────────────────────────────
-const T1              = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.dD";
-const T2              = "IGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
+const T1              = "PASTE_FIRST_HALF";
+const T2              = "PASTE_SECOND_HALF";
 const TOKEN           = T1 + T2;
-const CHANNEL_ID      = "1490713616813523004";
+const CHANNEL_ID      = "PASTE_YOUR_CHANNEL_ID_HERE";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 const NTL_URL         = "https://ntl-slither.com/ss/";
@@ -114,72 +114,89 @@ async function fetchWithRetry(url, attempts = 3) {
 // 📊 PARSE PLAYERS
 // ──────────────────────────────────────
 function extractPlayers(html) {
-  // Step 1: strip HTML tags first (before decoding entities)
-  // so that special chars in names (&gt; &lt;) stay encoded until after tag removal
-  const stripped = html.replace(/<[^>]+>/g, " ");
-
-  // Step 2: decode entities
-  const decoded = decodeEntities(stripped);
-
-  // Step 3: find server 8828 (IN server)
+  // Find 8828 IN server BEFORE stripping tags
+  // Look for "8828" in raw HTML (may be inside a span tag)
+  // The raw HTML pattern: <span...>8828</span>148.113...IN
+  // or just: 8828148.113...IN
+  // Find the index of "8828" that is near "IN"
   let idx = -1;
-  for (const p of ["8828148.113", "8828\u00a0", "8828 "]) {
-    idx = decoded.indexOf(p);
-    if (idx !== -1) break;
-  }
-  if (idx === -1) {
-    let pos = 0;
-    while (true) {
-      const i = decoded.indexOf("8828", pos);
-      if (i === -1) break;
-      if (decoded.substring(i, i + 600).includes("IN")) { idx = i; break; }
-      pos = i + 1;
+  let searchPos = 0;
+  while (true) {
+    const i = html.indexOf("8828", searchPos);
+    if (i === -1) break;
+    // Check if "IN" appears within 500 chars after this "8828"
+    if (html.substring(i, i + 500).includes("IN")) {
+      idx = i;
+      break;
     }
+    searchPos = i + 1;
   }
-  if (idx === -1) { console.log("⚠️ Server 8828 not found"); return []; }
 
-  const section = decoded.substring(idx, idx + 3000);
+  if (idx === -1) {
+    console.log("⚠️ Server 8828 not found");
+    return [];
+  }
 
-  // Step 4: find player data starting with "1# "
-  const playerStart = section.indexOf("1# ");
+  // Get a chunk of HTML from 8828 onwards (enough for all player data)
+  const chunk = html.substring(idx, idx + 4000);
+
+  // Find "1# " inside this chunk - the start of player data
+  const playerStart = chunk.indexOf("1# ");
   if (playerStart === -1) {
     console.log(`⚠️ No player data found. HTML length: ${html.length}`);
     return [];
   }
 
-  // Step 5: find end of player data
-  let playerEnd = section.length;
+  // Find end of player data - look for "Total Score" or next server block
+  let playerEnd = chunk.length;
   for (const marker of ["Total Score", "Updated:"]) {
-    const pos = section.indexOf(marker, playerStart + 10);
+    const pos = chunk.indexOf(marker, playerStart + 10);
     if (pos !== -1 && pos < playerEnd) playerEnd = pos;
   }
 
-  const playerData = section.substring(playerStart, playerEnd).replace(/\s+/g, " ").trim();
+  // Extract just the player data string and clean it up
+  let playerData = chunk.substring(playerStart, playerEnd);
 
-  // Step 6: parse each player sequentially (rank 1 to 10)
+  // Remove HTML tags (but do this AFTER locating the section to avoid issues with names like "<")
+  playerData = playerData.replace(/<[^>]+>/g, " ");
+
+  // Decode entities
+  playerData = decodeEntities(playerData);
+
+  // Collapse whitespace
+  playerData = playerData.replace(/\s+/g, " ").trim();
+
+  if (!playerData || !playerData.includes("#")) {
+    console.log(`⚠️ Player data empty after cleanup`);
+    return [];
+  }
+
+  // Parse each player sequentially by rank (1 to 10)
   const players = [];
   let remaining = playerData;
 
   for (let rank = 1; rank <= 10; rank++) {
+    // Strip current rank prefix
     const prefix    = rank + "# ";
     const altPrefix = rank + "#";
     if (remaining.startsWith(prefix))         remaining = remaining.substring(prefix.length);
     else if (remaining.startsWith(altPrefix)) remaining = remaining.substring(altPrefix.length);
 
     const nextRank = rank + 1;
-    let chunk;
+    let chunkStr;
     if (nextRank <= 10) {
       const pos = remaining.indexOf(nextRank + "#");
-      if (pos === -1) { chunk = remaining.trim(); remaining = ""; }
-      else { chunk = remaining.substring(0, pos).trim(); remaining = remaining.substring(pos); }
+      if (pos === -1) { chunkStr = remaining.trim(); remaining = ""; }
+      else { chunkStr = remaining.substring(0, pos).trim(); remaining = remaining.substring(pos); }
     } else {
-      chunk = remaining.trim();
+      chunkStr = remaining.trim();
     }
 
-    const scoreMatch = chunk.match(/(\d{3,7})\s*$/);
+    // Score = trailing digits (3-7 digits)
+    const scoreMatch = chunkStr.match(/(\d{3,7})\s*$/);
     if (scoreMatch) {
       const score = parseInt(scoreMatch[1], 10);
-      const name  = chunk.substring(0, chunk.length - scoreMatch[0].length).trim() || "(no name)";
+      const name  = chunkStr.substring(0, chunkStr.length - scoreMatch[0].length).trim() || "(no name)";
       if (score > 100) players.push({ name, score });
     }
     if (!remaining) break;
