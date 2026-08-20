@@ -138,22 +138,25 @@ function extractPlayers(html) {
 
   const chunk = html.substring(idx, idx + 4000);
 
+  // Decode &nbsp; before searching so "1#&nbsp;" becomes "1# "
+  const chunkDecoded = chunk.replace(/&nbsp;?/g, " ").replace(/&#160;/g, " ");
+
   // Find "1# " — start of player data
-  const playerStart = chunk.indexOf("1# ");
+  const playerStart = chunkDecoded.indexOf("1# ");
   if (playerStart === -1) {
-    console.log(`⚠️ No player data (1#) found near 8828`);
+    console.log(`⚠️ No player data (1#) found near 8828. Chunk sample: ${chunk.substring(0, 200)}`);
     return [];
   }
 
   // Find end of player data
-  let playerEnd = chunk.length;
+  let playerEnd = chunkDecoded.length;
   for (const marker of ["Total Score", "Updated:"]) {
-    const pos = chunk.indexOf(marker, playerStart + 10);
+    const pos = chunkDecoded.indexOf(marker, playerStart + 10);
     if (pos !== -1 && pos < playerEnd) playerEnd = pos;
   }
 
   // Clean up: strip HTML tags, decode entities, collapse whitespace
-  let playerData = chunk.substring(playerStart, playerEnd);
+  let playerData = chunkDecoded.substring(playerStart, playerEnd);
   playerData = playerData.replace(/<[^>]+>/g, " ");
   playerData = decodeEntities(playerData);
   playerData = playerData.replace(/\s+/g, " ").trim();
