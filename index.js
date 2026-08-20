@@ -16,10 +16,10 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 // ─────────────────────────────────────
 // 🔑 CONFIG
 // ─────────────────────────────────────
-const T1              = "PASTE_FIRST_HALF";
-const T2              = "PASTE_SECOND_HALF";
+const T1              = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.d";
+const T2              = "DIGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
 const TOKEN           = T1 + T2;
-const CHANNEL_ID      = "PASTE_YOUR_CHANNEL_ID_HERE";
+const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 const NTL_URL         = "https://ntl-slither.com/ss/";
