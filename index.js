@@ -189,7 +189,9 @@ function extractPlayers(html) {
     const scoreMatch = chunkStr.match(/(\d{3,7})\s*$/);
     if (scoreMatch) {
       const score = parseInt(scoreMatch[1], 10);
-      const name  = chunkStr.substring(0, chunkStr.length - scoreMatch[0].length).trim() || "(no name)";
+      let name = chunkStr.substring(0, chunkStr.length - scoreMatch[0].length);
+      // Strip any leftover HTML tags (e.g. <img> with base64 data in name)
+      name = name.replace(/<[^>]*>/g, "").trim() || "(no name)";
       if (score > 100) players.push({ name, score });
     }
     if (!remaining) break;
