@@ -16,10 +16,10 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 // ─────────────────────────────────────
 // 🔑 CONFIG
 // ─────────────────────────────────────
-const T1              = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.d";
-const T2              = "DIGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
+const T1              = "PASTE_FIRST_HALF";
+const T2              = "PASTE_SECOND_HALF";
 const TOKEN           = T1 + T2;
-const CHANNEL_ID      = "1490713616813523004";
+const CHANNEL_ID      = "PASTE_YOUR_CHANNEL_ID_HERE";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 const NTL_URL         = "https://ntl-slither.com/ss/rs.php";
@@ -55,10 +55,18 @@ const TEAMS = {
 
 function normalizeName(name) { return name.toLowerCase().replace(/\s+/g, ""); }
 
+// Also collapse spaced letters: "{ J S R }" → "{jsr}", "[ J S R ]" → "[jsr]"
+function normalizeSpaced(name) {
+  return name.toLowerCase()
+    .replace(/\b([a-z])\s+(?=[a-z]\b)/g, "$1") // collapse spaced letters
+    .replace(/\s+/g, "");
+}
+
 function detectTeam(name) {
-  const n = normalizeName(name);
+  const n1 = normalizeName(name);
+  const n2 = normalizeSpaced(name);
   for (const [key, team] of Object.entries(TEAMS)) {
-    if (team.patterns.some(p => n.includes(p))) return key;
+    if (team.patterns.some(p => n1.includes(p) || n2.includes(p))) return key;
   }
   return null;
 }
@@ -293,6 +301,9 @@ client.once("ready", async () => {
     for (const p of players) {
       activePlayers.add(p.name);
       try {
+        // Skip alerts for nameless players (HTML parsing artifact)
+        if (p.name === "(no name)") continue;
+
         if (!isJSR(p.name)) {
           if (p.score >= 30000 && !alerted30.has(p.name)) {
             alerted30.add(p.name);
