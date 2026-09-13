@@ -55,10 +55,10 @@ const TEAMS = {
 
 function normalizeName(name) { return name.toLowerCase().replace(/\s+/g, ""); }
 
-// Also collapse spaced letters: "{ J S R }" → "{jsr}", "[ J S R ]" → "[jsr]"
+// Handles spaced letters like "{ J S R }" → "{jsr}"
 function normalizeSpaced(name) {
   return name.toLowerCase()
-    .replace(/\b([a-z])\s+(?=[a-z]\b)/g, "$1") // collapse spaced letters
+    .replace(/\b([a-z])\s+(?=[a-z]\b)/g, "$1")
     .replace(/\s+/g, "");
 }
 
@@ -85,25 +85,31 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 FETCH — realistic browser headers
+// 🌐 FETCH — with cookie session
 // ──────────────────────────────────────
-function fetchHTML(url) {
+let sessionCookie = "";
+
+function fetchURL(url, cookie = "") {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-IN,en;q=0.9",
-        "Accept-Encoding": "identity",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Referer": "https://ntl-slither.com/",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "identity",
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache",
+      "Referer": "https://ntl-slither.com/",
+      "Connection": "keep-alive",
+    };
+    if (cookie) headers["Cookie"] = cookie;
+
+    const req = https.get(url, { headers }, (res) => {
+      const setCookie = res.headers["set-cookie"];
+      if (setCookie) {
+        sessionCookie = setCookie.map(c => c.split(";")[0]).join("; ");
       }
-    }, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        return fetchHTML(res.headers.location).then(resolve).catch(reject);
+      if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+        return fetchURL(res.headers.location, cookie).then(resolve).catch(reject);
       }
       let data = "";
       res.on("data", chunk => data += chunk);
@@ -116,8 +122,22 @@ function fetchHTML(url) {
 
 async function fetchWithRetry(url, attempts = 3) {
   for (let i = 1; i <= attempts; i++) {
-    try { return await fetchHTML(url); }
-    catch (e) {
+    try {
+      if (!sessionCookie) {
+        console.log("🍪 Getting session cookie...");
+        await fetchURL("https://ntl-slither.com/ss/").catch(() => {});
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      const html = await fetchURL(url, sessionCookie);
+      if (html.length < 5000 && i < attempts) {
+        console.log(`⚠️ Short response (${html.length} chars), refreshing session...`);
+        sessionCookie = "";
+        await fetchURL("https://ntl-slither.com/ss/").catch(() => {});
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
+      return html;
+    } catch (e) {
       console.log(`⚠️ Fetch attempt ${i}/${attempts} failed: ${e.message}`);
       if (i < attempts) await new Promise(r => setTimeout(r, 3000));
     }
@@ -129,7 +149,6 @@ async function fetchWithRetry(url, attempts = 3) {
 // 📊 PARSE PLAYERS
 // ──────────────────────────────────────
 function extractPlayers(html) {
-  // Find server 8828 in raw HTML
   let idx = -1;
   let searchPos = 0;
   while (true) {
@@ -140,41 +159,32 @@ function extractPlayers(html) {
   }
 
   if (idx === -1) {
-    console.log(`⚠️ Server 8828 not found. HTML length: ${html.length}. First 300 chars: ${html.substring(0, 300)}`);
+    console.log(`⚠️ Server 8828 not found. HTML length: ${html.length}. First 200: ${html.substring(0, 200)}`);
     return [];
   }
 
   const chunk = html.substring(idx, idx + 4000);
-
-  // Decode &nbsp; before searching so "1#&nbsp;" becomes "1# "
   const chunkDecoded = chunk.replace(/&nbsp;?/g, " ").replace(/&#160;/g, " ");
 
-  // Find "1# " — start of player data
   const playerStart = chunkDecoded.indexOf("1# ");
   if (playerStart === -1) {
-    console.log(`⚠️ No player data (1#) found near 8828. Chunk sample: ${chunk.substring(0, 200)}`);
+    console.log(`⚠️ No player data (1#) found near 8828`);
     return [];
   }
 
-  // Find end of player data
   let playerEnd = chunkDecoded.length;
   for (const marker of ["Total Score", "Updated:"]) {
     const pos = chunkDecoded.indexOf(marker, playerStart + 10);
     if (pos !== -1 && pos < playerEnd) playerEnd = pos;
   }
 
-  // Clean up: strip HTML tags, decode entities, collapse whitespace
   let playerData = chunkDecoded.substring(playerStart, playerEnd);
   playerData = playerData.replace(/<[^>]+>/g, " ");
   playerData = decodeEntities(playerData);
   playerData = playerData.replace(/\s+/g, " ").trim();
 
-  if (!playerData || !playerData.includes("#")) {
-    console.log(`⚠️ Player data empty after cleanup`);
-    return [];
-  }
+  if (!playerData || !playerData.includes("#")) return [];
 
-  // Parse each rank sequentially (1 to 10)
   const players = [];
   let remaining = playerData;
 
@@ -198,7 +208,6 @@ function extractPlayers(html) {
     if (scoreMatch) {
       const score = parseInt(scoreMatch[1], 10);
       let name = chunkStr.substring(0, chunkStr.length - scoreMatch[0].length);
-      // Strip any leftover HTML tags (e.g. <img> with base64 data in name)
       name = name.replace(/<[^>]*>/g, "").trim() || "(no name)";
       if (score > 100) players.push({ name, score });
     }
@@ -301,7 +310,6 @@ client.once("ready", async () => {
     for (const p of players) {
       activePlayers.add(p.name);
       try {
-        // Skip alerts for nameless players (HTML parsing artifact)
         if (p.name === "(no name)") continue;
 
         if (!isJSR(p.name)) {
