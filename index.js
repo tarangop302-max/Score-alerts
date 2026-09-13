@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
 const http = require("http");
+const WebSocket = require("ws");
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
@@ -22,8 +23,10 @@ const TOKEN           = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
-const NTL_BASE        = "https://ntl-slither.com/ss/";
-const NTL_URL         = "https://api.allorigins.win/raw?url=" + encodeURIComponent(NTL_BASE);
+
+// Server 8828 direct IP
+const SERVER_IP       = "148.113.20.151";
+const SERVER_PORT     = 444;
 const ALERT_INTERVAL  = 20000;
 
 let activePlayers    = new Set();
@@ -56,7 +59,6 @@ const TEAMS = {
 
 function normalizeName(name) { return name.toLowerCase().replace(/\s+/g, ""); }
 
-// Handles spaced letters like "{ J S R }" → "{jsr}"
 function normalizeSpaced(name) {
   return name.toLowerCase()
     .replace(/\b([a-z])\s+(?=[a-z]\b)/g, "$1")
@@ -74,128 +76,92 @@ function detectTeam(name) {
 
 function isJSR(name) { return detectTeam(name) === "JSR"; }
 
-function decodeEntities(str) {
-  return str
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&nbsp/g, " ");
-}
-
 function truncateName(name, max = 22) {
   return name.length <= max ? name : name.slice(0, max - 1) + "…";
 }
 
 // ──────────────────────────────────────
-// 🌐 FETCH — via proxy to bypass IP block
+// 🐍 FETCH LEADERBOARD VIA SLITHER WEBSOCKET
 // ──────────────────────────────────────
-function fetchHTML(url) {
+function fetchLeaderboard() {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, {
+    const timeout = setTimeout(() => {
+      ws.terminate();
+      reject(new Error("Timeout waiting for leaderboard"));
+    }, 15000);
+
+    const ws = new WebSocket(`ws://${SERVER_IP}:${SERVER_PORT}/slither`, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Origin": "http://slither.io",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       }
-    }, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        return fetchHTML(res.headers.location).then(resolve).catch(reject);
-      }
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => resolve(data));
     });
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error("Timeout")); });
-    req.on("error", reject);
+
+    ws.on("open", () => {
+      console.log("🔌 Connected to slither.io server 8828");
+      // Send init packet - slither.io protocol requires a version handshake
+      // Protocol: send a Buffer with the version byte
+      const initPacket = Buffer.from([0x73, 0x74, 0x61, 0x72, 0x74]); // "start"
+      ws.send(initPacket);
+    });
+
+    ws.on("message", (data) => {
+      try {
+        const buf = Buffer.from(data);
+        if (buf.length < 2) return;
+
+        const msgType = buf[0];
+
+        // Type 'l' (0x6c) = leaderboard packet
+        if (msgType === 0x6c) {
+          const players = [];
+          let offset = 1;
+
+          while (offset < buf.length) {
+            // Each entry: score (4 bytes) + name length (1 byte) + name (utf8)
+            if (offset + 4 >= buf.length) break;
+            const score = buf.readUInt32BE(offset);
+            offset += 4;
+            const nameLen = buf[offset];
+            offset += 1;
+            if (offset + nameLen > buf.length) break;
+            const name = buf.toString("utf8", offset, offset + nameLen) || "(no name)";
+            offset += nameLen;
+            if (score > 0) players.push({ name, score });
+          }
+
+          if (players.length > 0) {
+            clearTimeout(timeout);
+            ws.terminate();
+            resolve(players.sort((a, b) => b.score - a.score));
+          }
+        }
+      } catch (e) {
+        // Continue waiting for more packets
+      }
+    });
+
+    ws.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+
+    ws.on("close", () => {
+      clearTimeout(timeout);
+    });
   });
 }
 
-async function fetchWithRetry(url, attempts = 3) {
+async function fetchWithRetry(attempts = 3) {
   for (let i = 1; i <= attempts; i++) {
     try {
-      const html = await fetchHTML(url);
-      if (html.length < 5000 && i < attempts) {
-        console.log(`⚠️ Short response (${html.length} chars), retrying...`);
-        await new Promise(r => setTimeout(r, 3000));
-        continue;
-      }
-      return html;
+      return await fetchLeaderboard();
     } catch (e) {
-      console.log(`⚠️ Fetch attempt ${i}/${attempts} failed: ${e.message}`);
+      console.log(`⚠️ Attempt ${i}/${attempts} failed: ${e.message}`);
       if (i < attempts) await new Promise(r => setTimeout(r, 3000));
     }
   }
-  throw new Error("All fetch attempts failed");
-}
-
-// ──────────────────────────────────────
-// 📊 PARSE PLAYERS
-// ──────────────────────────────────────
-function extractPlayers(html) {
-  let idx = -1;
-  let searchPos = 0;
-  while (true) {
-    const i = html.indexOf("8828", searchPos);
-    if (i === -1) break;
-    if (html.substring(i, i + 600).includes("IN")) { idx = i; break; }
-    searchPos = i + 1;
-  }
-
-  if (idx === -1) {
-    console.log(`⚠️ Server 8828 not found. HTML length: ${html.length}. First 200: ${html.substring(0, 200)}`);
-    return [];
-  }
-
-  const chunk = html.substring(idx, idx + 4000);
-  const chunkDecoded = chunk.replace(/&nbsp;?/g, " ").replace(/&#160;/g, " ");
-
-  const playerStart = chunkDecoded.indexOf("1# ");
-  if (playerStart === -1) {
-    console.log(`⚠️ No player data (1#) found near 8828`);
-    return [];
-  }
-
-  let playerEnd = chunkDecoded.length;
-  for (const marker of ["Total Score", "Updated:"]) {
-    const pos = chunkDecoded.indexOf(marker, playerStart + 10);
-    if (pos !== -1 && pos < playerEnd) playerEnd = pos;
-  }
-
-  let playerData = chunkDecoded.substring(playerStart, playerEnd);
-  playerData = playerData.replace(/<[^>]+>/g, " ");
-  playerData = decodeEntities(playerData);
-  playerData = playerData.replace(/\s+/g, " ").trim();
-
-  if (!playerData || !playerData.includes("#")) return [];
-
-  const players = [];
-  let remaining = playerData;
-
-  for (let rank = 1; rank <= 10; rank++) {
-    const prefix    = rank + "# ";
-    const altPrefix = rank + "#";
-    if (remaining.startsWith(prefix))         remaining = remaining.substring(prefix.length);
-    else if (remaining.startsWith(altPrefix)) remaining = remaining.substring(altPrefix.length);
-
-    const nextRank = rank + 1;
-    let chunkStr;
-    if (nextRank <= 10) {
-      const pos = remaining.indexOf(nextRank + "#");
-      if (pos === -1) { chunkStr = remaining.trim(); remaining = ""; }
-      else { chunkStr = remaining.substring(0, pos).trim(); remaining = remaining.substring(pos); }
-    } else {
-      chunkStr = remaining.trim();
-    }
-
-    const scoreMatch = chunkStr.match(/(\d{3,7})\s*$/);
-    if (scoreMatch) {
-      const score = parseInt(scoreMatch[1], 10);
-      let name = chunkStr.substring(0, chunkStr.length - scoreMatch[0].length);
-      name = name.replace(/<[^>]*>/g, "").trim() || "(no name)";
-      if (score > 100) players.push({ name, score });
-    }
-    if (!remaining) break;
-  }
-
-  return players.sort((a, b) => b.score - a.score);
+  throw new Error("All attempts failed");
 }
 
 // ──────────────────────────────────────
@@ -253,13 +219,9 @@ client.once("ready", async () => {
   }, 3 * 60 * 60 * 1000);
 
   async function runLoop() {
-    let html;
-    try { html = await fetchWithRetry(NTL_URL); }
-    catch (e) { console.log("❌ Fetch failed:", e.message); return; }
-
     let players;
-    try { players = extractPlayers(html); }
-    catch (e) { console.log("❌ Parse error:", e.message); return; }
+    try { players = await fetchWithRetry(); }
+    catch (e) { console.log("❌ Fetch failed:", e.message); return; }
 
     if (!players.length) return;
 
