@@ -22,7 +22,8 @@ const TOKEN           = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
-const NTL_URL         = "https://ntl-slither.com/ss/";
+const NTL_BASE        = "https://ntl-slither.com/ss/";
+const NTL_URL         = "https://api.allorigins.win/raw?url=" + encodeURIComponent(NTL_BASE);
 const ALERT_INTERVAL  = 20000;
 
 let activePlayers    = new Set();
@@ -85,36 +86,18 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 FETCH — with cookie session
+// 🌐 FETCH — via proxy to bypass IP block
 // ──────────────────────────────────────
-let sessionCookie = "";
-
-function fetchURL(url, cookie = "") {
+function fetchHTML(url) {
   return new Promise((resolve, reject) => {
-    const headers = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9,en-IN;q=0.8",
-      "Accept-Encoding": "identity",
-      "Cache-Control": "no-cache",
-      "Pragma": "no-cache",
-      "Referer": "https://ntl-slither.com/ss/",
-      "Origin": "https://ntl-slither.com",
-      "Connection": "keep-alive",
-      "Upgrade-Insecure-Requests": "1",
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "same-origin",
-    };
-    if (cookie) headers["Cookie"] = cookie;
-
-    const req = https.get(url, { headers }, (res) => {
-      const setCookie = res.headers["set-cookie"];
-      if (setCookie) {
-        sessionCookie = setCookie.map(c => c.split(";")[0]).join("; ");
+    const req = https.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       }
-      if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
-        return fetchURL(res.headers.location, cookie).then(resolve).catch(reject);
+    }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return fetchHTML(res.headers.location).then(resolve).catch(reject);
       }
       let data = "";
       res.on("data", chunk => data += chunk);
@@ -128,17 +111,10 @@ function fetchURL(url, cookie = "") {
 async function fetchWithRetry(url, attempts = 3) {
   for (let i = 1; i <= attempts; i++) {
     try {
-      if (!sessionCookie) {
-        console.log("🍪 Getting session cookie...");
-        await fetchURL("https://ntl-slither.com/ss/").catch(() => {});
-        await new Promise(r => setTimeout(r, 1000));
-      }
-      const html = await fetchURL(url, sessionCookie);
+      const html = await fetchHTML(url);
       if (html.length < 5000 && i < attempts) {
-        console.log(`⚠️ Short response (${html.length} chars), refreshing session...`);
-        sessionCookie = "";
-        await fetchURL("https://ntl-slither.com/ss/").catch(() => {});
-        await new Promise(r => setTimeout(r, 2000));
+        console.log(`⚠️ Short response (${html.length} chars), retrying...`);
+        await new Promise(r => setTimeout(r, 3000));
         continue;
       }
       return html;
