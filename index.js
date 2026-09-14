@@ -1,6 +1,6 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const https = require("https");
 const http = require("http");
+const Bot = require("rattlesnake");
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
@@ -22,15 +22,8 @@ const TOKEN           = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
+const SERVER          = "148.113.20.151:444"; // Server 8828
 const ALERT_INTERVAL  = 20000;
-
-// Proxy list — tries each one in order until one works
-const PROXIES = [
-  "https://api.allorigins.win/raw?url=",
-  "https://corsproxy.io/?",
-  "https://api.codetabs.com/v1/proxy?quest=",
-];
-const TARGET_URL = "https://ntl-slither.com/ss/rs.php";
 
 let activePlayers    = new Set();
 const alerted30      = new Set();
@@ -38,6 +31,7 @@ const alerted80      = new Set();
 const jsr20          = new Set();
 const jsr50          = new Set();
 let leaderboardMessage = null;
+let lastPlayers      = [];
 
 // ──────────────────────────────────────
 // 🏷️ TEAM DETECTION
@@ -79,128 +73,8 @@ function detectTeam(name) {
 
 function isJSR(name) { return detectTeam(name) === "JSR"; }
 
-function decodeEntities(str) {
-  return str
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&nbsp/g, " ");
-}
-
 function truncateName(name, max = 22) {
   return name.length <= max ? name : name.slice(0, max - 1) + "…";
-}
-
-// ──────────────────────────────────────
-// 🌐 FETCH
-// ──────────────────────────────────────
-function fetchURL(url) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      }
-    }, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        return fetchURL(res.headers.location).then(resolve).catch(reject);
-      }
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => resolve(data));
-    });
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error("Timeout")); });
-    req.on("error", reject);
-  });
-}
-
-// Try each proxy until one returns real data (>5000 chars)
-async function fetchWithProxy() {
-  for (const proxy of PROXIES) {
-    try {
-      const url  = proxy + encodeURIComponent(TARGET_URL);
-      const html = await fetchURL(url);
-      if (html.length > 5000) {
-        console.log(`✅ Proxy worked: ${proxy.split("//")[1].split("/")[0]}`);
-        return html;
-      }
-      console.log(`⚠️ Proxy returned short response (${html.length}): ${proxy.split("//")[1].split("/")[0]}`);
-    } catch (e) {
-      console.log(`⚠️ Proxy failed: ${e.message}`);
-    }
-  }
-  throw new Error("All proxies failed");
-}
-
-// ──────────────────────────────────────
-// 📊 PARSE PLAYERS
-// ──────────────────────────────────────
-function extractPlayers(html) {
-  let idx = -1;
-  let searchPos = 0;
-  while (true) {
-    const i = html.indexOf("8828", searchPos);
-    if (i === -1) break;
-    if (html.substring(i, i + 600).includes("IN")) { idx = i; break; }
-    searchPos = i + 1;
-  }
-
-  if (idx === -1) {
-    console.log(`⚠️ Server 8828 not found. HTML length: ${html.length}`);
-    return [];
-  }
-
-  const chunk        = html.substring(idx, idx + 4000);
-  const chunkDecoded = chunk.replace(/&nbsp;?/g, " ").replace(/&#160;/g, " ");
-  const playerStart  = chunkDecoded.indexOf("1# ");
-
-  if (playerStart === -1) {
-    console.log(`⚠️ No player data (1#) found near 8828`);
-    return [];
-  }
-
-  let playerEnd = chunkDecoded.length;
-  for (const marker of ["Total Score", "Updated:"]) {
-    const pos = chunkDecoded.indexOf(marker, playerStart + 10);
-    if (pos !== -1 && pos < playerEnd) playerEnd = pos;
-  }
-
-  let playerData = chunkDecoded.substring(playerStart, playerEnd);
-  playerData = playerData.replace(/<[^>]+>/g, " ");
-  playerData = decodeEntities(playerData);
-  playerData = playerData.replace(/\s+/g, " ").trim();
-
-  if (!playerData || !playerData.includes("#")) return [];
-
-  const players = [];
-  let remaining = playerData;
-
-  for (let rank = 1; rank <= 10; rank++) {
-    const prefix    = rank + "# ";
-    const altPrefix = rank + "#";
-    if (remaining.startsWith(prefix))         remaining = remaining.substring(prefix.length);
-    else if (remaining.startsWith(altPrefix)) remaining = remaining.substring(altPrefix.length);
-
-    const nextRank = rank + 1;
-    let chunkStr;
-    if (nextRank <= 10) {
-      const pos = remaining.indexOf(nextRank + "#");
-      if (pos === -1) { chunkStr = remaining.trim(); remaining = ""; }
-      else { chunkStr = remaining.substring(0, pos).trim(); remaining = remaining.substring(pos); }
-    } else {
-      chunkStr = remaining.trim();
-    }
-
-    const scoreMatch = chunkStr.match(/(\d{3,7})\s*$/);
-    if (scoreMatch) {
-      const score = parseInt(scoreMatch[1], 10);
-      let name = chunkStr.substring(0, chunkStr.length - scoreMatch[0].length);
-      name = name.replace(/<[^>]*>/g, "").trim() || "(no name)";
-      if (score > 100) players.push({ name, score });
-    }
-    if (!remaining) break;
-  }
-
-  return players.sort((a, b) => b.score - a.score);
 }
 
 // ──────────────────────────────────────
@@ -226,7 +100,7 @@ function buildLeaderboardEmbed(players) {
     color: 0x7b2fff,
     author: { name: "🇮🇳 Slither Server 8828" },
     title: "🐍 Leaderboard (Top 10)",
-    description: board,
+    description: board || "No players found",
     fields: [
       { name: "💯 Total Score", value: totalScore.toLocaleString(), inline: true },
       { name: "👥 Players",     value: String(players.length),      inline: true },
@@ -238,38 +112,28 @@ function buildLeaderboardEmbed(players) {
 }
 
 // ──────────────────────────────────────
-// 🚀 BOT READY
+// 🐍 SLITHER BOT CONNECTION
 // ──────────────────────────────────────
-client.once("ready", async () => {
-  console.log(`✅ Bot ready: ${client.user.tag}`);
+function createSlitherBot(channel, kingChannel) {
+  const bot = new Bot({
+    name: "JSR-Observer",
+    server: SERVER,
+  });
 
-  const channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID error:", e.message); return null; });
-  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => { console.log("❌ KING_CHANNEL_ID error:", e.message); return null; });
-
-  if (!channel)     { console.log("❌ Main channel not found!"); return; }
-  if (!kingChannel) { console.log("❌ King channel not found!"); return; }
-
-  await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
-  console.log("✅ Startup message sent!");
-
-  setInterval(() => {
-    channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
-    console.log("💓 Heartbeat sent");
-  }, 3 * 60 * 60 * 1000);
-
-  async function runLoop() {
-    let html;
-    try { html = await fetchWithProxy(); }
-    catch (e) { console.log("❌ All proxies failed:", e.message); return; }
-
-    let players;
-    try { players = extractPlayers(html); }
-    catch (e) { console.log("❌ Parse error:", e.message); return; }
+  bot.on("leaderboard", async (leaderboard) => {
+    // leaderboard is array of {name, score} from rattlesnake
+    const players = leaderboard
+      .filter(p => p && p.name !== undefined)
+      .map(p => ({ name: p.name || "(no name)", score: p.score || 0 }))
+      .filter(p => p.score > 0)
+      .sort((a, b) => b.score - a.score);
 
     if (!players.length) return;
 
+    lastPlayers = players;
     console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players on 8828`);
 
+    // Update leaderboard
     try {
       const embed = buildLeaderboardEmbed(players);
       if (leaderboardMessage) {
@@ -284,6 +148,7 @@ client.once("ready", async () => {
       leaderboardMessage = null;
     }
 
+    // Clean up left players
     const currentNames = new Set(players.map(p => p.name));
     for (const name of [...activePlayers]) {
       if (!currentNames.has(name)) {
@@ -293,10 +158,12 @@ client.once("ready", async () => {
       }
     }
 
+    // Alerts
     for (const p of players) {
       activePlayers.add(p.name);
       try {
         if (p.name === "(no name)") continue;
+
         if (!isJSR(p.name)) {
           if (p.score >= 30000 && !alerted30.has(p.name)) {
             alerted30.add(p.name);
@@ -358,10 +225,46 @@ client.once("ready", async () => {
         }
       } catch (err) { console.log("Send error:", err?.message); }
     }
-  }
+  });
 
-  await runLoop();
-  setInterval(runLoop, ALERT_INTERVAL);
+  bot.on("error", (err) => {
+    console.log("🐍 Slither bot error:", err?.message || err);
+  });
+
+  bot.on("close", () => {
+    console.log("🔌 Slither connection closed — reconnecting in 5s...");
+    setTimeout(() => {
+      createSlitherBot(channel, kingChannel);
+    }, 5000);
+  });
+
+  bot.connect();
+  console.log(`🔌 Connecting to slither.io server 8828...`);
+  return bot;
+}
+
+// ──────────────────────────────────────
+// 🚀 BOT READY
+// ──────────────────────────────────────
+client.once("ready", async () => {
+  console.log(`✅ Bot ready: ${client.user.tag}`);
+
+  const channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID error:", e.message); return null; });
+  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => { console.log("❌ KING_CHANNEL_ID error:", e.message); return null; });
+
+  if (!channel)     { console.log("❌ Main channel not found!"); return; }
+  if (!kingChannel) { console.log("❌ King channel not found!"); return; }
+
+  await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
+  console.log("✅ Startup message sent!");
+
+  setInterval(() => {
+    channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
+    console.log("💓 Heartbeat sent");
+  }, 3 * 60 * 60 * 1000);
+
+  // Start the slither.io connection
+  createSlitherBot(channel, kingChannel);
 });
 
 client.login(TOKEN);
