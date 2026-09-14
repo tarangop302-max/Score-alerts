@@ -26,12 +26,21 @@ const ALERT_ROLE      = "<@&1493480046986268803>";
 const SERVER_IP       = "148.113.20.151";
 const SERVER_PORT     = 444;
 
-// Fixed cpw bytes from slither.io client (game1107241958.js)
+// Fixed cpw bytes from slither.io game client
 const CPW = Buffer.from([
   0x36, 0xce, 0xcc, 0xa9, 0x61, 0xb2, 0x4a, 0x88,
   0x7c, 0x75, 0x0e, 0xd2, 0x6a, 0xec, 0x08, 0xd0,
   0x88, 0xd5, 0x8c, 0x6f
 ]);
+
+// Browser-like WebSocket headers that the server expects
+const WS_HEADERS = {
+  "Origin": "http://slither.io",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache",
+};
 
 let activePlayers    = new Set();
 const alerted30      = new Set();
@@ -53,7 +62,6 @@ function buildPatterns(tag) {
     `${t}/`, `/${t}`, `${t}#`, `#${t}`,
   ];
 }
-
 const TEAMS = {
   JSR:  { patterns: buildPatterns("jsr"),  emoji: "🟠" },
   SMT:  { patterns: buildPatterns("smt"),  emoji: "🔵" },
@@ -61,10 +69,9 @@ const TEAMS = {
   LWK:  { patterns: buildPatterns("lwk"),  emoji: "🟡" },
   IND:  { patterns: buildPatterns("ind"),  emoji: "🟢" },
 };
-
-function normalizeName(name) { return name.toLowerCase().replace(/\s+/g, ""); }
-function normalizeSpaced(name) {
-  return name.toLowerCase().replace(/\b([a-z])\s+(?=[a-z]\b)/g, "$1").replace(/\s+/g, "");
+function normalizeName(n) { return n.toLowerCase().replace(/\s+/g, ""); }
+function normalizeSpaced(n) {
+  return n.toLowerCase().replace(/\b([a-z])\s+(?=[a-z]\b)/g, "$1").replace(/\s+/g, "");
 }
 function detectTeam(name) {
   const n1 = normalizeName(name), n2 = normalizeSpaced(name);
@@ -81,18 +88,16 @@ function truncateName(name, max = 22) {
 // 🏆 LEADERBOARD EMBED
 // ──────────────────────────────────────
 function buildLeaderboardEmbed(players) {
-  const top10      = players.slice(0, 10);
-  const totalScore = players.reduce((sum, p) => sum + p.score, 0);
-  const now        = new Date();
-  const dateStr    = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
-  const timeStr    = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
-  const RANK_ICONS = ["🥇", "🥈", "🥉"];
+  const top10 = players.slice(0, 10);
+  const totalScore = players.reduce((s, p) => s + p.score, 0);
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
+  const ICONS = ["🥇", "🥈", "🥉"];
   let board = "";
   top10.forEach((p, i) => {
-    const rankIcon = RANK_ICONS[i] || `#${i + 1}`;
     const team = detectTeam(p.name);
-    const teamTag = team ? `${TEAMS[team].emoji} ` : "";
-    board += `${rankIcon} ${teamTag}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
+    board += `${ICONS[i] || `#${i+1}`} ${team ? TEAMS[team].emoji + " " : ""}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
   });
   return {
     color: 0x7b2fff,
@@ -101,8 +106,8 @@ function buildLeaderboardEmbed(players) {
     description: board || "Waiting for data...",
     fields: [
       { name: "💯 Total Score", value: totalScore.toLocaleString(), inline: true },
-      { name: "👥 Players",     value: String(players.length),      inline: true },
-      { name: "🕐 Updated",     value: "Just now",                  inline: true },
+      { name: "👥 Players", value: String(players.length), inline: true },
+      { name: "🕐 Updated", value: "Just now", inline: true },
       { name: "🏷️ Teams", value: "🟠 JSR  🔵 SMT  🔴 DINO  🟡 LWK  🟢 IND", inline: false },
     ],
     footer: { text: `Powered by JSR Gaming  •  Last Refresh | ${dateStr} ${timeStr}` },
@@ -128,184 +133,220 @@ async function processAlerts(players) {
       if (!isJSR(p.name)) {
         if (p.score >= 30000 && !alerted30.has(p.name)) {
           alerted30.add(p.name);
-          console.log(`🚨 Enemy: ${p.name} (${p.score})`);
           await channel.send({ content: ALERT_ROLE, embeds: [{ color: 0xff2d2d, title: "🚨 TARGET ACQUIRED",
-            description: "━━━━━━━━━━━━━━━━━━\n🎯 ENEMY LOCKED\n\n" +
-              `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
-              "⚔️ MISSION\n• Surround\n• Trap\n• Eliminate\n━━━━━━━━━━━━━━━━━━",
+            description: `━━━━━━━━━━━━━━━━━━\n🎯 ENEMY LOCKED\n\n🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n⚔️ MISSION\n• Surround\n• Trap\n• Eliminate\n━━━━━━━━━━━━━━━━━━`,
             footer: { text: "⚡ JSR Tactical System" }, timestamp: new Date() }] });
         }
         if (p.score >= 80000 && !alerted80.has(p.name)) {
           alerted80.add(p.name);
           await channel.send({ content: ALERT_ROLE, embeds: [{ color: 0x990000, title: "💀 ULTRA THREAT",
-            description: "━━━━━━━━━━━━━━━━━━\n🔥 EXTREME TARGET\n\n" +
-              `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
-              "🚨 GLOBAL ORDER\nALL PLAYERS → ATTACK NOW\n━━━━━━━━━━━━━━━━━━",
+            description: `━━━━━━━━━━━━━━━━━━\n🔥 EXTREME TARGET\n\n🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n🚨 GLOBAL ORDER\nALL PLAYERS → ATTACK NOW\n━━━━━━━━━━━━━━━━━━`,
             footer: { text: "☠️ JSR War Protocol" }, timestamp: new Date() }] });
         }
       } else {
         if (p.score >= 20000 && !jsr20.has(p.name)) {
           jsr20.add(p.name);
           await channel.send({ content: ALERT_ROLE, embeds: [{ color: 0x00ffcc, title: "🛡️ ALLY SUPPORT",
-            description: "━━━━━━━━━━━━━━━━━━\n🤝 JSR MEMBER ACTIVE\n\n" +
-              `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
-              "🟢 SUPPORT PLAN\n• Stay Close\n• Feed\n• Protect\n━━━━━━━━━━━━━━━━━━",
+            description: `━━━━━━━━━━━━━━━━━━\n🤝 JSR MEMBER ACTIVE\n\n🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n🟢 SUPPORT PLAN\n• Stay Close\n• Feed\n• Protect\n━━━━━━━━━━━━━━━━━━`,
             footer: { text: "🛡️ JSR Support System" }, timestamp: new Date() }] });
         }
         if (p.score >= 50000 && !jsr50.has(p.name)) {
           jsr50.add(p.name);
           await channel.send({ content: ALERT_ROLE, embeds: [{ color: 0x00cc66, title: "🚨 CRITICAL ALLY",
-            description: "━━━━━━━━━━━━━━━━━━\n⚠️ HIGH VALUE JSR\n\n" +
-              `🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n` +
-              "🔥 EMERGENCY ORDER\nDEFEND AT ALL COSTS\n━━━━━━━━━━━━━━━━━━",
+            description: `━━━━━━━━━━━━━━━━━━\n⚠️ HIGH VALUE JSR\n\n🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n🔥 EMERGENCY ORDER\nDEFEND AT ALL COSTS\n━━━━━━━━━━━━━━━━━━`,
             footer: { text: "⚡ JSR Emergency Protocol" }, timestamp: new Date() }] });
         }
       }
-    } catch (err) { console.log("Send error:", err?.message); }
+    } catch (err) { console.log("Alert error:", err?.message); }
   }
 }
 
 // ──────────────────────────────────────
-// 🐍 SLITHER.IO DIRECT CONNECTION
+// 📊 PARSE LEADERBOARD PACKET
 // ──────────────────────────────────────
-function parseLeaderboard(buf, offset) {
-  // Packet 'l' format (from ClitherProject docs):
-  // byte 0: 'l' opcode
-  // bytes 1-4: unused/rank info
-  // Then groups of: 2 bytes score(BE) + 1 byte name_len + name_bytes
+function parseLeaderboard(buf, startOffset) {
+  // Log raw hex for debugging
+  console.log("🔬 Leaderboard raw:", buf.slice(startOffset, startOffset + 60).toString("hex"));
+
   const players = [];
   try {
-    let i = offset + 1; // skip opcode
+    // Skip opcode byte, then try multiple parse strategies
+    let i = startOffset + 1;
 
-    // Skip first 5 bytes of header
-    i += 5;
+    // Strategy: read pairs of (fam_value, name_len, name)
+    // fam is fractional mass — 2 bytes BE, multiply by ~30 for approximate score
+    // Try reading from various offsets to find valid data
+    for (let skip = 0; skip <= 10; skip++) {
+      const players2 = [];
+      let j = startOffset + 1 + skip;
+      let valid = true;
 
-    while (i < buf.length) {
-      if (i + 2 >= buf.length) break;
-      // Score is stored as fam value — multiply to get approximate length
-      const score = buf.readUInt16BE(i) * 10;
-      i += 2;
-      if (i >= buf.length) break;
-      const nameLen = buf[i++];
-      if (nameLen === 0 || i + nameLen > buf.length) {
-        if (nameLen === 0) players.push({ name: "(no name)", score });
-        break;
+      for (let rank = 0; rank < 10; rank++) {
+        if (j + 3 > buf.length) { valid = false; break; }
+        const fam = buf.readUInt16BE(j); j += 2;
+        const score = Math.round(fam * 4.9); // approximate conversion
+        const nameLen = buf[j++];
+        if (nameLen > 50 || j + nameLen > buf.length) { valid = false; break; }
+        const name = buf.toString("utf8", j, j + nameLen);
+        j += nameLen;
+        players2.push({ name: name || "(no name)", score });
       }
-      const name = buf.toString("utf8", i, i + nameLen);
-      i += nameLen;
-      if (score > 0) players.push({ name: name || "(no name)", score });
+
+      if (valid && players2.length >= 3 && players2[0].score > 100) {
+        console.log(`✅ Parse strategy worked with skip=${skip}`);
+        return players2.sort((a, b) => b.score - a.score);
+      }
     }
-  } catch(e) {}
-  return players.sort((a, b) => b.score - a.score);
+  } catch(e) {
+    console.log("Parse error:", e.message);
+  }
+  return players;
 }
 
+// ──────────────────────────────────────
+// 🐍 SLITHER.IO CONNECTION
+// ──────────────────────────────────────
+let gameSocket = null;
+let pingInterval = null;
+let ptcDone = false;
+
 function connectToSlither() {
+  ptcDone = false;
+  gameSocket = null;
   console.log("🔌 Probing /ptc...");
 
   const ptc = new WebSocket(`ws://${SERVER_IP}:${SERVER_PORT}/ptc`, {
-    headers: { "Origin": "http://slither.io" }
+    headers: WS_HEADERS
   });
 
-  ptc.on("open", () => { ptc.send(Buffer.from([0x70])); });
-  ptc.on("message", () => { ptc.close(); });
-  ptc.on("error", () => {});
-  ptc.on("close", () => {
-    console.log("🔌 Connecting to /slither...");
-    openGameSocket();
+  ptc.on("open", () => {
+    console.log("✅ /ptc open");
+    ptc.send(Buffer.from([0x70]));
   });
 
-  // If ptc doesn't close within 3s, proceed anyway
+  ptc.on("message", (data) => {
+    console.log("📦 /ptc msg:", Buffer.from(data).toString("hex").substring(0, 30));
+  });
+
+  ptc.on("error", (e) => console.log("⚠️ /ptc:", e.message));
+
+  ptc.on("close", (code) => {
+    console.log(`/ptc closed (${code})`);
+    if (!ptcDone) { ptcDone = true; openGameSocket(); }
+  });
+
   setTimeout(() => {
-    if (ptc.readyState !== WebSocket.CLOSED) ptc.terminate();
-    openGameSocket();
+    if (!ptcDone) {
+      ptcDone = true;
+      try { ptc.terminate(); } catch(e) {}
+      openGameSocket();
+    }
   }, 3000);
 }
 
-let gameSocket = null;
-let pingInterval = null;
-let reconnectTimeout = null;
-
 function openGameSocket() {
-  if (gameSocket) return; // already connecting
+  if (gameSocket) return;
+
+  console.log("🔌 Opening /slither...");
 
   const ws = new WebSocket(`ws://${SERVER_IP}:${SERVER_PORT}/slither`, {
-    headers: { "Origin": "http://slither.io" }
+    headers: WS_HEADERS,
+    perMessageDeflate: false,
   });
   gameSocket = ws;
 
   let idba = new Array(27).fill(0);
   let loginSent = false;
+  let msgCount = 0;
 
   ws.on("open", () => {
-    console.log("✅ Connected to slither.io server 8828!");
+    console.log("✅ /slither open — sending handshake...");
+    // Send exactly as the browser does: 01, then 6300
     ws.send(Buffer.from([0x01]));
-    ws.send(Buffer.from([0x63, 0x00]));
+    setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(Buffer.from([0x63, 0x00]));
+      }
+    }, 100);
 
-    // Keep alive with pings
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.send(Buffer.from([0xfb]));
-    }, 2000);
+    }, 2500);
   });
 
-  ws.on("message", async (data) => {
-    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  ws.on("message", async (rawData) => {
+    const buf = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
     if (buf.length === 0) return;
+    msgCount++;
 
-    // Determine offset (framing)
+    // Log all early messages for debugging
+    if (msgCount <= 5) {
+      console.log(`📦 msg#${msgCount} len=${buf.length} hex=${buf.toString("hex").substring(0, 60)}`);
+    }
+
+    // Handle framing: packets can be wrapped with a 2-byte header if first byte < 32
     let offset = 0;
     if (buf[0] < 32) offset = 2;
-
     if (offset >= buf.length) return;
+
     const opcode = buf[offset];
 
     // Opcode 6 = server challenge
     if (opcode === 0x06 && !loginSent) {
+      loginSent = true;
       const payload = buf.slice(offset + 1).toString("utf8").trim();
-      console.log("🔑 Challenge received, length:", payload.length);
+      console.log(`🔑 Challenge (len=${payload.length}):`, payload.substring(0, 80));
 
       try {
-        // Execute the server's JS snippet which sets idba values
-        const sandbox = { idba: Array(27).fill(0) };
+        const sandbox = { idba: new Array(27).fill(0) };
         vm.createContext(sandbox);
-        vm.runInContext(payload, sandbox, { timeout: 1000 });
-        idba = sandbox.idba;
+        vm.runInContext(payload, sandbox, { timeout: 2000 });
+        idba = Array.from(sandbox.idba);
+        console.log("✅ idba generated:", Buffer.from(idba).toString("hex").substring(0, 20));
       } catch(e) {
-        console.log("⚠️ Challenge eval error:", e.message);
+        console.log("⚠️ Challenge eval:", e.message);
+        // Use zeros if eval fails
       }
 
-      // Send idba response
+      // Send idba
       ws.send(Buffer.from(idba));
-      console.log("📤 Sent idba challenge response");
 
-      // Build and send login packet
+      // Send login packet after short delay
+      await new Promise(r => setTimeout(r, 100));
+
       const nick = Buffer.from("JSR-Observer", "utf8");
       const login = Buffer.alloc(4 + CPW.length + 2 + nick.length + 2);
-      let i = 0;
-      login[i++] = 0x73;       // login opcode
-      login[i++] = 0x1e;       // fixed byte
-      login[i++] = 0x01;       // version high
-      login[i++] = 0x23;       // version low
-      CPW.copy(login, i); i += CPW.length;
-      login[i++] = 0x05;       // color
-      login[i++] = nick.length;
-      nick.copy(login, i); i += nick.length;
-      login[i++] = 0x00;
-      login[i++] = 0xff;
+      let idx = 0;
+      login[idx++] = 0x73;
+      login[idx++] = 0x1e;
+      login[idx++] = 0x01;
+      login[idx++] = 0x23;
+      CPW.copy(login, idx); idx += CPW.length;
+      login[idx++] = 0x05;
+      login[idx++] = nick.length;
+      nick.copy(login, idx); idx += nick.length;
+      login[idx++] = 0x00;
+      login[idx++] = 0xff;
 
-      ws.send(login);
-      console.log("📤 Sent login packet — waiting for leaderboard...");
-      loginSent = true;
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(login);
+        console.log("📤 Login sent — waiting for game data...");
+      }
     }
 
     // Opcode 'l' (0x6c) = leaderboard
     if (opcode === 0x6c) {
+      console.log("🏆 LEADERBOARD packet received!");
       const players = parseLeaderboard(buf, offset);
-      if (!players.length) return;
 
-      console.log(`📊 ${new Date().toLocaleTimeString()} — Leaderboard received: ${players.length} players`);
-      players.slice(0, 5).forEach((p, i) => console.log(`  #${i+1} ${p.name} — ${p.score}`));
+      if (!players.length) {
+        console.log("⚠️ Could not parse leaderboard");
+        return;
+      }
 
-      // Update Discord leaderboard
+      console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players`);
+      players.slice(0, 3).forEach((p, i) => console.log(`  #${i+1} ${p.name} — ${p.score}`));
+
       try {
         const embed = buildLeaderboardEmbed(players);
         if (leaderboardMessage) {
@@ -315,7 +356,7 @@ function openGameSocket() {
           console.log("🏆 Leaderboard created!");
         }
       } catch(e) {
-        console.log("❌ Leaderboard error:", e.message);
+        console.log("❌ Discord error:", e.message);
         leaderboardMessage = null;
       }
 
@@ -323,15 +364,13 @@ function openGameSocket() {
     }
   });
 
-  ws.on("error", (e) => {
-    console.log("❌ WebSocket error:", e.message);
-  });
+  ws.on("error", (e) => console.log("❌ WS error:", e.message));
 
-  ws.on("close", (code) => {
-    console.log(`🔌 Disconnected (${code}) — reconnecting in 5s...`);
+  ws.on("close", (code, reason) => {
+    console.log(`🔌 Disconnected (${code}) after ${msgCount} msgs — reconnecting in 5s...`);
     if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
     gameSocket = null;
-    reconnectTimeout = setTimeout(connectToSlither, 5000);
+    setTimeout(connectToSlither, 5000);
   });
 }
 
@@ -341,8 +380,8 @@ function openGameSocket() {
 client.once("ready", async () => {
   console.log(`✅ Discord bot ready: ${client.user.tag}`);
 
-  channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID error:", e.message); return null; });
-  kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => { console.log("❌ KING_CHANNEL_ID error:", e.message); return null; });
+  channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID:", e.message); return null; });
+  kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => { console.log("❌ KING_CHANNEL_ID:", e.message); return null; });
 
   if (!channel || !kingChannel) { console.log("❌ Channels not found!"); return; }
 
@@ -354,7 +393,6 @@ client.once("ready", async () => {
     console.log("💓 Heartbeat sent");
   }, 3 * 60 * 60 * 1000);
 
-  // Start slither.io connection
   connectToSlither();
 });
 
