@@ -26,21 +26,22 @@ const ALERT_ROLE      = "<@&1493480046986268803>";
 const SERVER_IP       = "148.113.20.151";
 const SERVER_PORT     = 444;
 
-// Fixed cpw bytes from slither.io game client
-const CPW = Buffer.from([
-  0x36, 0xce, 0xcc, 0xa9, 0x61, 0xb2, 0x4a, 0x88,
-  0x7c, 0x75, 0x0e, 0xd2, 0x6a, 0xec, 0x08, 0xd0,
-  0x88, 0xd5, 0x8c, 0x6f
-]);
+// fpsls and fmlts lookup tables from slither.io client (used to calculate score from sct+fam)
+const fpsls = [0];
+const fmlts = [0];
+(function() {
+  let r = 1;
+  for (let i = 1; i < 21000; i++) {
+    fpsls.push(r);
+    fmlts.push(1 / (r - 1 + 1));
+    r += 1 / (i + 9);
+  }
+})();
 
-// Browser-like WebSocket headers that the server expects
-const WS_HEADERS = {
-  "Origin": "http://slither.io",
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Cache-Control": "no-cache",
-  "Pragma": "no-cache",
-};
+function calcScore(sct, fam) {
+  if (sct >= fpsls.length) return 0;
+  return Math.floor(15 * (fpsls[sct] + fam / fmlts[sct] - 1) - 5);
+}
 
 let activePlayers    = new Set();
 const alerted30      = new Set();
@@ -162,189 +163,162 @@ async function processAlerts(players) {
 }
 
 // ──────────────────────────────────────
-// 📊 PARSE LEADERBOARD PACKET
+// 📊 PARSE LEADERBOARD PACKET "l"
+// Per ClitherProject/Slither.io-Protocol:
+// Byte 0-1: time header
+// Byte 2: opcode 'l'
+// Byte 3: local rank byte
+// Byte 4-5: local rank int16
+// Byte 6-7: player count int16
+// Then for each of 10 players:
+//   int16 sct, int24 fam, int8 color, int8 nameLen, string name
 // ──────────────────────────────────────
-function parseLeaderboard(buf, startOffset) {
-  // Log raw hex for debugging
-  console.log("🔬 Leaderboard raw:", buf.slice(startOffset, startOffset + 60).toString("hex"));
-
+function parseLeaderboard(buf) {
   const players = [];
   try {
-    // Skip opcode byte, then try multiple parse strategies
-    let i = startOffset + 1;
+    const playerCount = buf.readUInt16BE(6);
+    let offset = 8; // start of player entries
 
-    // Strategy: read pairs of (fam_value, name_len, name)
-    // fam is fractional mass — 2 bytes BE, multiply by ~30 for approximate score
-    // Try reading from various offsets to find valid data
-    for (let skip = 0; skip <= 10; skip++) {
-      const players2 = [];
-      let j = startOffset + 1 + skip;
-      let valid = true;
+    for (let i = 0; i < 10; i++) {
+      if (offset + 6 > buf.length) break;
+      const sct = buf.readUInt16BE(offset); offset += 2;
+      const fam = buf.readUIntBE(offset, 3) / 16777215; offset += 3;
+      const color = buf[offset++];
+      const nameLen = buf[offset++];
+      if (offset + nameLen > buf.length) break;
+      const name = buf.toString("utf8", offset, offset + nameLen) || "(no name)";
+      offset += nameLen;
+      const score = calcScore(sct, fam);
+      if (score > 0) players.push({ name, score, sct });
+    }
 
-      for (let rank = 0; rank < 10; rank++) {
-        if (j + 3 > buf.length) { valid = false; break; }
-        const fam = buf.readUInt16BE(j); j += 2;
-        const score = Math.round(fam * 4.9); // approximate conversion
-        const nameLen = buf[j++];
-        if (nameLen > 50 || j + nameLen > buf.length) { valid = false; break; }
-        const name = buf.toString("utf8", j, j + nameLen);
-        j += nameLen;
-        players2.push({ name: name || "(no name)", score });
-      }
-
-      if (valid && players2.length >= 3 && players2[0].score > 100) {
-        console.log(`✅ Parse strategy worked with skip=${skip}`);
-        return players2.sort((a, b) => b.score - a.score);
-      }
+    if (players.length > 0) {
+      console.log(`✅ Parsed ${players.length} players, server count: ${playerCount}`);
+      return { players: players.sort((a, b) => b.score - a.score), totalPlayers: playerCount };
     }
   } catch(e) {
     console.log("Parse error:", e.message);
   }
-  return players;
+  return { players: [], totalPlayers: 0 };
 }
 
 // ──────────────────────────────────────
 // 🐍 SLITHER.IO CONNECTION
+// Correct protocol per ClitherProject docs:
+// 1. Connect to /slither
+// 2. Send 0x63 ('c') — StartLogin
+// 3. Receive packet '6' — challenge JS
+// 4. Execute JS, send 24-byte result
+// 5. Send SetUsernameAndSkin (0x73='s', proto-1=10, skinId, nameLen, name)
+// 6. Send ping 0xfb every 250ms
+// 7. Receive leaderboard 'l' packets
 // ──────────────────────────────────────
 let gameSocket = null;
 let pingInterval = null;
-let ptcDone = false;
 
 function connectToSlither() {
-  ptcDone = false;
-  gameSocket = null;
-  console.log("🔌 Probing /ptc...");
-
-  const ptc = new WebSocket(`ws://${SERVER_IP}:${SERVER_PORT}/ptc`, {
-    headers: WS_HEADERS
-  });
-
-  ptc.on("open", () => {
-    console.log("✅ /ptc open");
-    ptc.send(Buffer.from([0x70]));
-  });
-
-  ptc.on("message", (data) => {
-    console.log("📦 /ptc msg:", Buffer.from(data).toString("hex").substring(0, 30));
-  });
-
-  ptc.on("error", (e) => console.log("⚠️ /ptc:", e.message));
-
-  ptc.on("close", (code) => {
-    console.log(`/ptc closed (${code})`);
-    if (!ptcDone) { ptcDone = true; openGameSocket(); }
-  });
-
-  setTimeout(() => {
-    if (!ptcDone) {
-      ptcDone = true;
-      try { ptc.terminate(); } catch(e) {}
-      openGameSocket();
-    }
-  }, 3000);
-}
-
-function openGameSocket() {
   if (gameSocket) return;
-
-  console.log("🔌 Opening /slither...");
+  console.log("🔌 Connecting to slither.io server 8828...");
 
   const ws = new WebSocket(`ws://${SERVER_IP}:${SERVER_PORT}/slither`, {
-    headers: WS_HEADERS,
+    headers: {
+      "Origin": "http://slither.io",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache",
+    },
     perMessageDeflate: false,
   });
   gameSocket = ws;
 
-  let idba = new Array(27).fill(0);
-  let loginSent = false;
   let msgCount = 0;
+  let loginSent = false;
 
   ws.on("open", () => {
-    console.log("✅ /slither open — sending handshake...");
-    // Send exactly as the browser does: 01, then 6300
-    ws.send(Buffer.from([0x01]));
-    setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(Buffer.from([0x63, 0x00]));
-      }
-    }, 100);
+    console.log("✅ Connected! Sending StartLogin (0x63)...");
+    // Step 1: Send StartLogin packet
+    ws.send(Buffer.from([0x63]));
 
+    // Ping every 250ms
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.send(Buffer.from([0xfb]));
-    }, 2500);
+    }, 250);
   });
 
   ws.on("message", async (rawData) => {
     const buf = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
-    if (buf.length === 0) return;
+    if (buf.length < 3) return;
     msgCount++;
 
-    // Log all early messages for debugging
-    if (msgCount <= 5) {
-      console.log(`📦 msg#${msgCount} len=${buf.length} hex=${buf.toString("hex").substring(0, 60)}`);
+    // Every packet has 2-byte time header + 1 byte opcode
+    const opcode = buf[2];
+    const opcodeChar = String.fromCharCode(opcode);
+
+    if (msgCount <= 10) {
+      console.log(`📦 msg#${msgCount} opcode=0x${opcode.toString(16)}('${opcodeChar}') len=${buf.length} hex=${buf.toString("hex").substring(0, 40)}`);
     }
 
-    // Handle framing: packets can be wrapped with a 2-byte header if first byte < 32
-    let offset = 0;
-    if (buf[0] < 32) offset = 2;
-    if (offset >= buf.length) return;
-
-    const opcode = buf[offset];
-
-    // Opcode 6 = server challenge
-    if (opcode === 0x06 && !loginSent) {
+    // Packet '6' = Pre-init challenge
+    if (opcode === 0x36 && !loginSent) { // 0x36 = '6'
       loginSent = true;
-      const payload = buf.slice(offset + 1).toString("utf8").trim();
-      console.log(`🔑 Challenge (len=${payload.length}):`, payload.substring(0, 80));
+      const jsCode = buf.slice(3).toString("utf8").trim();
+      console.log(`🔑 Challenge received (len=${jsCode.length}):`, jsCode.substring(0, 60));
 
+      let secret = [];
       try {
-        const sandbox = { idba: new Array(27).fill(0) };
+        // The JS sets values in an array — execute it safely
+        const sandbox = { secret: [] };
+        // Also support if it uses different variable names
         vm.createContext(sandbox);
-        vm.runInContext(payload, sandbox, { timeout: 2000 });
-        idba = Array.from(sandbox.idba);
-        console.log("✅ idba generated:", Buffer.from(idba).toString("hex").substring(0, 20));
+        vm.runInContext(`var secret = []; ${jsCode}`, sandbox, { timeout: 2000 });
+        secret = sandbox.secret || [];
+        console.log("✅ Secret array length:", secret.length);
       } catch(e) {
-        console.log("⚠️ Challenge eval:", e.message);
-        // Use zeros if eval fails
+        console.log("⚠️ Challenge eval error:", e.message);
       }
 
-      // Send idba
-      ws.send(Buffer.from(idba));
+      // Decode secret using ClitherProject Java algorithm
+      const result = new Array(24).fill(0);
+      let globalValue = 0;
+      for (let i = 0; i < 24; i++) {
+        let v1 = secret[17 + i * 2] || 0;
+        if (v1 <= 96) v1 += 32;
+        v1 = ((v1 - 98 - i * 34) % 26 + 26) % 26;
 
-      // Send login packet after short delay
-      await new Promise(r => setTimeout(r, 100));
+        let v2 = secret[18 + i * 2] || 0;
+        if (v2 <= 96) v2 += 32;
+        v2 = ((v2 - 115 - i * 34) % 26 + 26) % 26;
 
+        let interim = (v1 << 4) | v2;
+        const offset2 = interim >= 97 ? 97 : 65;
+        interim -= offset2;
+        if (i === 0) globalValue = 2 + interim;
+        result[i] = (interim + globalValue) % 26 + offset2;
+        globalValue += 3 + interim;
+      }
+
+      console.log("📤 Sending challenge response:", Buffer.from(result).toString("hex").substring(0, 20));
+      ws.send(Buffer.from(result));
+
+      // Step 2: Send SetUsernameAndSkin
+      // Format: 0x73 ('s') | proto_version-1 (10) | skin_id | name_len | name
       const nick = Buffer.from("JSR-Observer", "utf8");
-      const login = Buffer.alloc(4 + CPW.length + 2 + nick.length + 2);
-      let idx = 0;
-      login[idx++] = 0x73;
-      login[idx++] = 0x1e;
-      login[idx++] = 0x01;
-      login[idx++] = 0x23;
-      CPW.copy(login, idx); idx += CPW.length;
-      login[idx++] = 0x05;
-      login[idx++] = nick.length;
-      nick.copy(login, idx); idx += nick.length;
-      login[idx++] = 0x00;
-      login[idx++] = 0xff;
-
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(login);
-        console.log("📤 Login sent — waiting for game data...");
-      }
+      const login = Buffer.alloc(4 + nick.length);
+      login[0] = 0x73; // 's'
+      login[1] = 10;   // protocol_version - 1
+      login[2] = 0;    // skin id
+      login[3] = nick.length;
+      nick.copy(login, 4);
+      ws.send(login);
+      console.log("📤 SetUsernameAndSkin sent — waiting for game data...");
     }
 
-    // Opcode 'l' (0x6c) = leaderboard
-    if (opcode === 0x6c) {
-      console.log("🏆 LEADERBOARD packet received!");
-      const players = parseLeaderboard(buf, offset);
+    // Packet 'l' = Leaderboard (0x6c)
+    if (opcode === 0x6c && buf.length > 8) {
+      const { players, totalPlayers } = parseLeaderboard(buf);
+      if (!players.length) return;
 
-      if (!players.length) {
-        console.log("⚠️ Could not parse leaderboard");
-        return;
-      }
-
-      console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players`);
+      console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players, server total: ${totalPlayers}`);
       players.slice(0, 3).forEach((p, i) => console.log(`  #${i+1} ${p.name} — ${p.score}`));
 
       try {
@@ -353,7 +327,7 @@ function openGameSocket() {
           await leaderboardMessage.edit({ embeds: [embed] });
         } else {
           leaderboardMessage = await kingChannel.send({ embeds: [embed] });
-          console.log("🏆 Leaderboard created!");
+          console.log("🏆 Leaderboard created in Discord!");
         }
       } catch(e) {
         console.log("❌ Discord error:", e.message);
@@ -366,7 +340,7 @@ function openGameSocket() {
 
   ws.on("error", (e) => console.log("❌ WS error:", e.message));
 
-  ws.on("close", (code, reason) => {
+  ws.on("close", (code) => {
     console.log(`🔌 Disconnected (${code}) after ${msgCount} msgs — reconnecting in 5s...`);
     if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
     gameSocket = null;
