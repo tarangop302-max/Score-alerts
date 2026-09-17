@@ -264,15 +264,21 @@ function connectToSlither() {
       const jsCode = buf.slice(3).toString("utf8").trim();
       console.log(`🔑 Challenge received (len=${jsCode.length}):`, jsCode.substring(0, 60));
 
-      let secret = [];
+      let secret = new Array(256).fill(0);
       try {
-        // The JS sets values in an array — execute it safely
-        const sandbox = { secret: [] };
-        // Also support if it uses different variable names
+        // Use Proxy so ANY undefined variable returns 0 (no ReferenceError)
+        const handler = {
+          get(target, prop) {
+            if (prop in target) return target[prop];
+            return 0;
+          },
+          has() { return true; }
+        };
+        const sandbox = new Proxy({ secret, Math, parseInt, parseFloat }, handler);
         vm.createContext(sandbox);
-        vm.runInContext(`var secret = []; ${jsCode}`, sandbox, { timeout: 2000 });
-        secret = sandbox.secret || [];
-        console.log("✅ Secret array length:", secret.length);
+        vm.runInContext(jsCode, sandbox, { timeout: 2000 });
+        secret = sandbox.secret || secret;
+        console.log("✅ Secret populated, secret[17]:", secret[17]);
       } catch(e) {
         console.log("⚠️ Challenge eval error:", e.message);
       }
