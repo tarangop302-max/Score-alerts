@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const WebSocket = require("ws");
 const http = require("http");
-const vm = require("vm");
+
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
@@ -261,33 +261,17 @@ function connectToSlither() {
     // Packet '6' = Pre-init challenge
     if (opcode === 0x36 && !loginSent) { // 0x36 = '6'
       loginSent = true;
-      const jsCode = buf.slice(3).toString("utf8").trim();
-      console.log(`🔑 Challenge received (len=${jsCode.length}):`, jsCode.substring(0, 60));
+      // Challenge data starts at byte 3 (after 2-byte time header + opcode)
+      // The challenge string's raw char codes ARE the secret array
+      // No JS eval needed — just use the bytes directly
+      const challengeData = buf.slice(3);
+      const jsCode = challengeData.toString("utf8");
+      console.log(`🔑 Challenge received (len=${challengeData.length}):`, jsCode.substring(0, 60));
 
-      let secret = new Array(256).fill(0);
-      try {
-        // Use Proxy so ANY undefined variable returns 0 (no ReferenceError)
-        const handler = {
-          get(target, prop) {
-            if (prop in target) return target[prop];
-            return 0;
-          },
-          has() { return true; },
-          set(target, prop, value) {
-            target[prop] = value;
-            return true;
-          }
-        };
-        const base = { Math, parseInt, parseFloat, Array };
-        const sandbox = new Proxy(base, handler);
-        vm.createContext(sandbox);
-        vm.runInContext(jsCode, sandbox, { timeout: 2000 });
-        // The JS defines its own 'secret' var — read it back from sandbox
-        secret = base.secret || sandbox.secret || secret;
-        console.log("✅ Secret length:", secret.length, "secret[17]:", secret[17]);
-      } catch(e) {
-        console.log("⚠️ Challenge eval error:", e.message);
-      }
+      // secret = raw char codes of the challenge data
+      const secret = Array.from(challengeData);
+      console.log(`✅ Secret extracted: len=${secret.length} secret[17]=${secret[17]}`);
+
 
       // Decode secret using ClitherProject Java algorithm
       const result = new Array(24).fill(0);
