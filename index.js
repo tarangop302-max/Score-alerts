@@ -272,13 +272,19 @@ function connectToSlither() {
             if (prop in target) return target[prop];
             return 0;
           },
-          has() { return true; }
+          has() { return true; },
+          set(target, prop, value) {
+            target[prop] = value;
+            return true;
+          }
         };
-        const sandbox = new Proxy({ secret, Math, parseInt, parseFloat }, handler);
+        const base = { Math, parseInt, parseFloat, Array };
+        const sandbox = new Proxy(base, handler);
         vm.createContext(sandbox);
         vm.runInContext(jsCode, sandbox, { timeout: 2000 });
-        secret = sandbox.secret || secret;
-        console.log("✅ Secret populated, secret[17]:", secret[17]);
+        // The JS defines its own 'secret' var — read it back from sandbox
+        secret = base.secret || sandbox.secret || secret;
+        console.log("✅ Secret length:", secret.length, "secret[17]:", secret[17]);
       } catch(e) {
         console.log("⚠️ Challenge eval error:", e.message);
       }
