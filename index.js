@@ -261,6 +261,19 @@ async function readLeaderboard() {
       // identify the real leaderboard array regardless of what it's called.
       const seen = new WeakSet();
       const hits = {};
+      function shallowPrimitiveCopy(obj) {
+        // Only keep string/number/boolean fields — drops nested objects/arrays
+        // so we can't hit circular references, and gives us a clean readable view.
+        const out = {};
+        for (const k of Object.keys(obj)) {
+          let v;
+          try { v = obj[k]; } catch(e) { continue; }
+          if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+            out[k] = v;
+          }
+        }
+        return out;
+      }
       function looksLikePlayer(obj) {
         if (!obj || typeof obj !== "object") return false;
         const keys = Object.keys(obj);
@@ -273,10 +286,11 @@ async function readLeaderboard() {
         }
         return hasString && hasNumber;
       }
+      const seenTraverse = new WeakSet();
       function scan(obj, path, depth) {
         if (depth > 2 || !obj || typeof obj !== "object") return;
-        if (seen.has(obj)) return;
-        seen.add(obj);
+        if (seenTraverse.has(obj)) return;
+        seenTraverse.add(obj);
         let keys;
         try { keys = Object.keys(obj); } catch(e) { return; }
         for (const k of keys) {
@@ -284,7 +298,7 @@ async function readLeaderboard() {
           try { v = obj[k]; } catch(e) { continue; }
           if (Array.isArray(v) && v.length >= 1 && v.length <= 15) {
             if (looksLikePlayer(v[0])) {
-              hits[path + "." + k] = v.slice(0, 12); // full values, not just keys
+              hits[path + "." + k] = v.slice(0, 12).map(shallowPrimitiveCopy);
             }
           } else if (v && typeof v === "object" && depth < 2) {
             scan(v, path + "." + k, depth + 1);
@@ -292,7 +306,34 @@ async function readLeaderboard() {
         }
       }
       try { scan(window, "window", 0); } catch(e) {}
-      console.log("LEADERBOARD_DEBUG scan:", JSON.stringify(hits).slice(0, 4000));
+
+      // Targeted probe: an earlier error revealed a window.*.clue.sos array
+      // that's circularly referenced — dump it directly and safely.
+      try {
+        for (const k of Object.keys(window)) {
+          let v;
+          try { v = window[k]; } catch(e) { continue; }
+          if (v && typeof v === "object" && v.clue && typeof v.clue === "object" && Array.isArray(v.clue.sos)) {
+            hits["window." + k + ".clue.sos"] = v.clue.sos.slice(0, 12).map(shallowPrimitiveCopy);
+          }
+          if (v && typeof v === "object" && v.sos !== undefined && Array.isArray(v.sos)) {
+            hits["window." + k + ".sos"] = v.sos.slice(0, 12).map(shallowPrimitiveCopy);
+          }
+        }
+      } catch(e) {}
+
+      // Circular-safe stringify as a backstop in case anything slips through
+      function safeStringify(obj) {
+        const cache = new Set();
+        return JSON.stringify(obj, (key, value) => {
+          if (typeof value === "object" && value !== null) {
+            if (cache.has(value)) return "[circular]";
+            cache.add(value);
+          }
+          return value;
+        });
+      }
+      console.log("LEADERBOARD_DEBUG scan:", safeStringify(hits).slice(0, 4000));
 
       return { source: "none", snakes: [] };
     });
