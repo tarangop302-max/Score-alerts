@@ -186,21 +186,6 @@ async function startBrowser() {
   // Wait for game scripts to load
   await page.waitForTimeout(2000);
 
-  // Install a fillText hook BEFORE the game starts drawing, so we capture
-  // every piece of text the canvas renders — including the real top-10
-  // leaderboard panel. This is stable even when internal variable names
-  // (window.gla, window.top_scores, etc.) get renamed by obfuscation.
-  await page.evaluate(() => {
-    window.__lbCapture = [];
-    const orig = CanvasRenderingContext2D.prototype.fillText;
-    CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...rest) {
-      window.__lbCapture.push({ text, x, y, t: Date.now() });
-      if (window.__lbCapture.length > 1500) window.__lbCapture.shift();
-      return orig.call(this, text, x, y, ...rest);
-    };
-    console.log("LEADERBOARD_DEBUG: fillText hook installed");
-  }).catch(e => console.log("⚠️ fillText hook failed:", e.message));
-
   // Inject server override BEFORE clicking play
   try {
     await page.evaluate((ip) => {
@@ -268,28 +253,46 @@ async function readLeaderboard() {
         if (snakes.length > 0) return { source: "top_scores", snakes };
       }
 
-      // Debug: dump ALL short window keys whose values look leaderboard-shaped
-      const debug = {};
-      for (const k of Object.keys(window)) {
-        if (k.length > 15) continue;
-        const v = window[k];
-        if (Array.isArray(v) && v.length > 0 && v.length <= 20) {
-          const first = v[0];
-          if (first && typeof first === "object" && ("nk" in first || "sc" in first || "fam" in first)) {
-            debug[k] = `Array(${v.length}) first keys: ${Object.keys(first).join(",")}`;
+      // Debug: recursively scan window for any SMALL array (<=15 items)
+      // whose objects carry a short string field (a name) plus a numeric
+      // field (a score/mass), but which is NOT the big ~80-key slithers
+      // object (that's the local view, not the global top-10). We log
+      // full first-element VALUES (not just key names) so we can visually
+      // identify the real leaderboard array regardless of what it's called.
+      const seen = new WeakSet();
+      const hits = {};
+      function looksLikePlayer(obj) {
+        if (!obj || typeof obj !== "object") return false;
+        const keys = Object.keys(obj);
+        if (keys.length < 1 || keys.length > 12) return false; // exclude the 80-key slithers objects
+        let hasString = false, hasNumber = false;
+        for (const k of keys) {
+          const v = obj[k];
+          if (typeof v === "string" && v.length > 0 && v.length < 30) hasString = true;
+          if (typeof v === "number") hasNumber = true;
+        }
+        return hasString && hasNumber;
+      }
+      function scan(obj, path, depth) {
+        if (depth > 2 || !obj || typeof obj !== "object") return;
+        if (seen.has(obj)) return;
+        seen.add(obj);
+        let keys;
+        try { keys = Object.keys(obj); } catch(e) { return; }
+        for (const k of keys) {
+          let v;
+          try { v = obj[k]; } catch(e) { continue; }
+          if (Array.isArray(v) && v.length >= 1 && v.length <= 15) {
+            if (looksLikePlayer(v[0])) {
+              hits[path + "." + k] = v.slice(0, 12); // full values, not just keys
+            }
+          } else if (v && typeof v === "object" && depth < 2) {
+            scan(v, path + "." + k, depth + 1);
           }
         }
       }
-      console.log("LEADERBOARD_DEBUG:", JSON.stringify(debug));
-
-      // Fallback: pull recent canvas fillText captures so we can see the
-      // real rendered leaderboard text/coordinates in Railway logs.
-      const recent = (window.__lbCapture || []).filter(e => Date.now() - e.t < 3000);
-      console.log("LEADERBOARD_DEBUG canvas dump:", JSON.stringify({
-        innerWidth: window.innerWidth,
-        innerHeight: window.innerHeight,
-        entries: recent.slice(-100)
-      }));
+      try { scan(window, "window", 0); } catch(e) {}
+      console.log("LEADERBOARD_DEBUG scan:", JSON.stringify(hits).slice(0, 4000));
 
       return { source: "none", snakes: [] };
     });
