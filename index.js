@@ -174,12 +174,11 @@ async function startBrowser() {
   page.on("console", msg => {
     const text = msg.text();
     if (text.includes("LEADERBOARD_DEBUG") || text.includes("Server set")) {
-      console.log("🌐 Browser:", text.substring(0, 300));
+      console.log("🌐 Browser:", text.substring(0, 2000));
     }
   });
 
   // Navigate directly to slither.io with server 8828 pre-selected
-  // slither.io supports ?ip= parameter to auto-connect to specific server
   console.log("🐍 Opening slither.io on server 8828...");
   await page.goto(`https://slither.io`, { waitUntil: "networkidle", timeout: 30000 });
   console.log("✅ Page loaded!");
@@ -187,8 +186,22 @@ async function startBrowser() {
   // Wait for game scripts to load
   await page.waitForTimeout(2000);
 
+  // Install a fillText hook BEFORE the game starts drawing, so we capture
+  // every piece of text the canvas renders — including the real top-10
+  // leaderboard panel. This is stable even when internal variable names
+  // (window.gla, window.top_scores, etc.) get renamed by obfuscation.
+  await page.evaluate(() => {
+    window.__lbCapture = [];
+    const orig = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...rest) {
+      window.__lbCapture.push({ text, x, y, t: Date.now() });
+      if (window.__lbCapture.length > 1500) window.__lbCapture.shift();
+      return orig.call(this, text, x, y, ...rest);
+    };
+    console.log("LEADERBOARD_DEBUG: fillText hook installed");
+  }).catch(e => console.log("⚠️ fillText hook failed:", e.message));
+
   // Inject server override BEFORE clicking play
-  // slither.io uses bso.ip and bso.po for server selection
   try {
     await page.evaluate((ip) => {
       if (window.bso) {
@@ -208,7 +221,6 @@ async function startBrowser() {
     console.log("✅ Clicked Play!");
   } catch(e) {
     try {
-      // Try alternative selectors
       await page.click("#play-btn", { timeout: 3000 });
     } catch(e2) {
       console.log("⚠️ Could not click play, trying keyboard...");
@@ -236,8 +248,7 @@ async function readLeaderboard() {
 
       const snakes = [];
 
-      // The real top-10 leaderboard is in window.gla (global leaderboard array)
-      // Each entry has: nk (name), sc (fam), sct (size cat), fam (mass)
+      // Try window.gla (global leaderboard array) — old key, may no longer exist
       if (window.gla && Array.isArray(window.gla) && window.gla.length) {
         for (const s of window.gla) {
           if (!s) continue;
@@ -247,7 +258,7 @@ async function readLeaderboard() {
         if (snakes.length > 0) return { source: "gla", snakes };
       }
 
-      // Try window.top_scores
+      // Try window.top_scores — old key, may no longer exist
       if (window.top_scores && Array.isArray(window.top_scores) && window.top_scores.length) {
         for (const s of window.top_scores) {
           if (!s) continue;
@@ -257,7 +268,7 @@ async function readLeaderboard() {
         if (snakes.length > 0) return { source: "top_scores", snakes };
       }
 
-      // Debug: dump ALL short window keys and their types/values
+      // Debug: dump ALL short window keys whose values look leaderboard-shaped
       const debug = {};
       for (const k of Object.keys(window)) {
         if (k.length > 15) continue;
@@ -270,6 +281,15 @@ async function readLeaderboard() {
         }
       }
       console.log("LEADERBOARD_DEBUG:", JSON.stringify(debug));
+
+      // Fallback: pull recent canvas fillText captures so we can see the
+      // real rendered leaderboard text/coordinates in Railway logs.
+      const recent = (window.__lbCapture || []).filter(e => Date.now() - e.t < 3000);
+      console.log("LEADERBOARD_DEBUG canvas dump:", JSON.stringify({
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        entries: recent.slice(-100)
+      }));
 
       return { source: "none", snakes: [] };
     });
@@ -291,7 +311,6 @@ async function runLoop() {
     const isDead = await page.evaluate(() => !window.slither || window.slither === null);
     if (isDead) {
       console.log("🔄 Snake died, respawning...");
-      // Re-inject server and click play again
       await page.evaluate((ip) => {
         if (window.bso) { window.bso.ip = ip; window.bso.po = 444; }
       }, SERVER_IP).catch(() => {});
