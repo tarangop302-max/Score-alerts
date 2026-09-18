@@ -217,38 +217,75 @@ async function readLeaderboard() {
   if (!page) return [];
   try {
     const data = await page.evaluate(() => {
-      const snakes = [];
-
-      // fpsls lookup table (same as game client) for score calculation
+      // fpsls for score calculation
       const fpsls = [0];
       let r = 1;
-      for (let i = 1; i < 21000; i++) {
-        fpsls.push(r);
-        r += 1 / (i + 9);
-      }
-      function calcScore(sct, fam) {
-        if (!sct || sct >= fpsls.length) return Math.round(fam * 15) || 0;
-        return Math.floor(15 * (fpsls[sct] + fam / (sct - fpsls[sct] + 1) - 1) - 5);
+      for (let i = 1; i < 21000; i++) { fpsls.push(r); r += 1 / (i + 9); }
+      function calcScore(sct, sc) {
+        if (!sct || sct >= fpsls.length) return Math.round((sc || 0) * 15);
+        return Math.floor(15 * (fpsls[sct] + sc / (sct - fpsls[sct] + 1) - 1) - 5);
       }
 
-      if (window.slithers) {
-        for (const id in window.slithers) {
-          const s = window.slithers[id];
+      const snakes = [];
+
+      // Method 1: window.top_scores — the actual top 10 leaderboard array
+      if (window.top_scores && window.top_scores.length) {
+        for (const s of window.top_scores) {
           if (!s) continue;
-          // sc = raw fam value, sct = size category
           const score = calcScore(s.sct, s.sc) || Math.round((s.pts || s.sc || 0) * 15);
-          if (score > 0) {
-            snakes.push({ name: s.nk || "(no name)", score });
-          }
+          snakes.push({ name: s.nk || "(no name)", score });
         }
+        if (snakes.length > 0) return snakes;
       }
+
+      // Method 2: window.leaderboard_data
+      if (window.leaderboard_data && window.leaderboard_data.length) {
+        for (const s of window.leaderboard_data) {
+          snakes.push({ name: s.nk || s.name || "(no name)", score: s.sc || s.score || 0 });
+        }
+        if (snakes.length > 0) return snakes;
+      }
+
+      // Method 3: Read from the DOM leaderboard element
+      const lbRows = document.querySelectorAll(".lb_entry, .leaderboard-entry, [id*='rank']");
+      if (lbRows.length > 0) {
+        for (const row of lbRows) {
+          const text = row.textContent || "";
+          snakes.push({ name: text.trim(), score: 0 });
+        }
+        if (snakes.length > 0) return snakes;
+      }
+
+      // Method 4: window.gla — global leaderboard array used in some versions
+      if (window.gla && window.gla.length) {
+        for (const s of window.gla) {
+          if (!s) continue;
+          const score = calcScore(s.sct, s.sc) || Math.round((s.pts || s.sc || 0) * 15);
+          snakes.push({ name: s.nk || "(no name)", score });
+        }
+        if (snakes.length > 0) return snakes;
+      }
+
+      // Method 5: Log ALL window keys containing snake data for debugging
+      const keys = Object.keys(window).filter(k =>
+        k.includes("top") || k.includes("lead") || k.includes("rank") ||
+        k.includes("score") || k.includes("board") || k.includes("gla") ||
+        k.includes("slith")
+      );
+      console.log("DEBUG window keys:", JSON.stringify(keys));
 
       return snakes;
     });
 
-    return data
-      .filter(p => p.score > 0)
-      .sort((a, b) => b.score - a.score);
+    if (data.length === 0) {
+      // Log window keys to Railway console for debugging
+      await page.evaluate(() => {
+        const keys = Object.keys(window).filter(k => typeof window[k] !== "function" && k.length < 20);
+        console.log("ALL window globals:", keys.slice(0, 50).join(", "));
+      });
+    }
+
+    return data.filter(p => p.score > 0).sort((a, b) => b.score - a.score);
   } catch(e) {
     console.log("⚠️ Read error:", e.message);
     return [];
