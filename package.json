@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "npx playwright install chromium --with-deps && node index.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "ws": "^8.17.0"
+    "playwright": "^1.44.0"
   }
 }
