@@ -170,22 +170,29 @@ async function startBrowser() {
 
   page = await context.newPage();
 
-  // Navigate to slither.io
-  console.log("🐍 Opening slither.io...");
-  await page.goto("https://slither.io", { waitUntil: "networkidle", timeout: 30000 });
+  // Navigate directly to slither.io with server 8828 pre-selected
+  // slither.io supports ?ip= parameter to auto-connect to specific server
+  console.log("🐍 Opening slither.io on server 8828...");
+  await page.goto(`https://slither.io`, { waitUntil: "networkidle", timeout: 30000 });
   console.log("✅ Page loaded!");
 
-  // Wait for game to initialize
-  await page.waitForTimeout(3000);
+  // Wait for game scripts to load
+  await page.waitForTimeout(2000);
 
-  // Try to auto-select server 8828 using the server IP
-  // slither.io allows setting server via URL fragment or console
+  // Inject server override BEFORE clicking play
+  // slither.io uses bso.ip and bso.po for server selection
   try {
     await page.evaluate((ip) => {
-      // Try to set server preference if the game exposes it
-      if (window.bso) window.bso.ip = ip;
+      if (window.bso) {
+        window.bso.ip = ip;
+        window.bso.po = 444;
+        console.log("Server set to:", ip);
+      }
     }, SERVER_IP);
-  } catch(e) {}
+    console.log("✅ Server override injected");
+  } catch(e) {
+    console.log("⚠️ Server override failed:", e.message);
+  }
 
   // Click play button
   try {
@@ -210,31 +217,29 @@ async function readLeaderboard() {
   if (!page) return [];
   try {
     const data = await page.evaluate(() => {
-      // Read all snakes from window globals
-      // window.slithers = object of all snakes on screen
-      // Each snake has: nk (nickname), sc (score pts), id
       const snakes = [];
 
-      // Method 1: window.slithers (object keyed by snake id)
+      // fpsls lookup table (same as game client) for score calculation
+      const fpsls = [0];
+      let r = 1;
+      for (let i = 1; i < 21000; i++) {
+        fpsls.push(r);
+        r += 1 / (i + 9);
+      }
+      function calcScore(sct, fam) {
+        if (!sct || sct >= fpsls.length) return Math.round(fam * 15) || 0;
+        return Math.floor(15 * (fpsls[sct] + fam / (sct - fpsls[sct] + 1) - 1) - 5);
+      }
+
       if (window.slithers) {
         for (const id in window.slithers) {
           const s = window.slithers[id];
-          if (s && s.sc > 0) {
-            snakes.push({
-              name: s.nk || "(no name)",
-              score: Math.round(s.sc * 15) || Math.round(s.pts || 0),
-            });
+          if (!s) continue;
+          // sc = raw fam value, sct = size category
+          const score = calcScore(s.sct, s.sc) || Math.round((s.pts || s.sc || 0) * 15);
+          if (score > 0) {
+            snakes.push({ name: s.nk || "(no name)", score });
           }
-        }
-      }
-
-      // Method 2: window.leaderboard if it exists
-      if (snakes.length === 0 && window.leaderboard) {
-        for (const entry of window.leaderboard) {
-          snakes.push({
-            name: entry.nk || entry.name || "(no name)",
-            score: entry.sc || entry.score || 0,
-          });
         }
       }
 
@@ -251,6 +256,22 @@ async function readLeaderboard() {
 }
 
 async function runLoop() {
+  // Auto-respawn if snake died (window.slither becomes null)
+  try {
+    const isDead = await page.evaluate(() => !window.slither || window.slither === null);
+    if (isDead) {
+      console.log("🔄 Snake died, respawning...");
+      // Re-inject server and click play again
+      await page.evaluate((ip) => {
+        if (window.bso) { window.bso.ip = ip; window.bso.po = 444; }
+      }, SERVER_IP).catch(() => {});
+      await page.click(".btnt.sadg1", { timeout: 3000 }).catch(async () => {
+        await page.keyboard.press("Enter");
+      });
+      await page.waitForTimeout(3000);
+    }
+  } catch(e) {}
+
   const players = await readLeaderboard();
 
   if (!players.length) {
