@@ -231,98 +231,88 @@ async function readLeaderboard() {
         return Math.floor(15*(fpsls[sct] + sc/(sct-fpsls[sct]+1) - 1) - 5);
       }
 
+      // Try the historically-known globals first, in case they still exist
+      // on this particular deploy.
       const snakes = [];
-
-      // Try window.gla (global leaderboard array) — old key, may no longer exist
       if (window.gla && Array.isArray(window.gla) && window.gla.length) {
         for (const s of window.gla) {
           if (!s) continue;
-          const score = calcScore(s.sct, s.fam || s.sc);
-          snakes.push({ name: s.nk || "(no name)", score });
+          snakes.push({ name: s.nk || "(no name)", score: calcScore(s.sct, s.fam || s.sc) });
         }
         if (snakes.length > 0) return { source: "gla", snakes };
       }
-
-      // Try window.top_scores — old key, may no longer exist
       if (window.top_scores && Array.isArray(window.top_scores) && window.top_scores.length) {
         for (const s of window.top_scores) {
           if (!s) continue;
-          const score = calcScore(s.sct, s.fam || s.sc);
-          snakes.push({ name: s.nk || "(no name)", score });
+          snakes.push({ name: s.nk || "(no name)", score: calcScore(s.sct, s.fam || s.sc) });
         }
         if (snakes.length > 0) return { source: "top_scores", snakes };
       }
 
-      // Debug: recursively scan window for any SMALL array (<=15 items)
-      // whose objects carry a short string field (a name) plus a numeric
-      // field (a score/mass), but which is NOT the big ~80-key slithers
-      // object (that's the local view, not the global top-10). We log
-      // full first-element VALUES (not just key names) so we can visually
-      // identify the real leaderboard array regardless of what it's called.
-      const seen = new WeakSet();
-      const hits = {};
+      // Targeted deep search: the game's own window.slithers objects use
+      // "nk" as the nickname field. That's a real, confirmed convention —
+      // not a guess — so instead of a generic "has a string and a number"
+      // heuristic (which false-matched the server-cluster list earlier),
+      // hunt specifically for small arrays whose objects carry "nk".
+      // Known large DOM/browser-API roots are skipped so we don't walk
+      // the whole page.
+      const SKIP_TOP_LEVEL = new Set([
+        "document","navigator","location","history","screen","console",
+        "localStorage","sessionStorage","indexedDB","crypto","performance",
+        "customElements","caches","chrome","external","frames","parent",
+        "top","self","window","opener","closed","frameElement",
+        "visualViewport","speechSynthesis","applicationCache","styleMedia",
+        "trustedTypes","cookieStore","documentPictureInPicture","event"
+      ]);
+      const seenObjs = new WeakSet();
+      const seenArrays = new WeakSet();
+      const found = {};
+      let visited = 0;
+
       function shallowPrimitiveCopy(obj) {
-        // Only keep string/number/boolean fields — drops nested objects/arrays
-        // so we can't hit circular references, and gives us a clean readable view.
         const out = {};
         for (const k of Object.keys(obj)) {
           let v;
           try { v = obj[k]; } catch(e) { continue; }
-          if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-            out[k] = v;
-          }
+          if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
         }
         return out;
       }
-      function looksLikePlayer(obj) {
-        if (!obj || typeof obj !== "object") return false;
-        const keys = Object.keys(obj);
-        if (keys.length < 1 || keys.length > 12) return false; // exclude the 80-key slithers objects
-        let hasString = false, hasNumber = false;
-        for (const k of keys) {
-          const v = obj[k];
-          if (typeof v === "string" && v.length > 0 && v.length < 30) hasString = true;
-          if (typeof v === "number") hasNumber = true;
-        }
-        return hasString && hasNumber;
+
+      function isCandidateArray(arr) {
+        if (!Array.isArray(arr) || arr.length < 1 || arr.length > 15) return false;
+        const first = arr[0];
+        if (!first || typeof first !== "object") return false;
+        const keys = Object.keys(first);
+        if (keys.length > 15) return false; // exclude the big ~80-key slithers physics objects
+        return typeof first.nk === "string";
       }
-      const seenTraverse = new WeakSet();
+
       function scan(obj, path, depth) {
-        if (depth > 2 || !obj || typeof obj !== "object") return;
-        if (seenTraverse.has(obj)) return;
-        seenTraverse.add(obj);
+        if (depth > 6 || visited > 20000 || !obj || typeof obj !== "object") return;
+        if (seenObjs.has(obj)) return;
+        seenObjs.add(obj);
+        visited++;
         let keys;
         try { keys = Object.keys(obj); } catch(e) { return; }
         for (const k of keys) {
+          if (depth === 0 && SKIP_TOP_LEVEL.has(k)) continue;
+          if (k.startsWith("on")) continue; // event-handler globals
           let v;
           try { v = obj[k]; } catch(e) { continue; }
-          if (Array.isArray(v) && v.length >= 1 && v.length <= 15) {
-            if (looksLikePlayer(v[0])) {
-              hits[path + "." + k] = v.slice(0, 12).map(shallowPrimitiveCopy);
+          if (typeof v === "function") continue;
+          if (Array.isArray(v)) {
+            if (isCandidateArray(v) && !seenArrays.has(v)) {
+              seenArrays.add(v);
+              found[path + "." + k] = v.slice(0, 12).map(shallowPrimitiveCopy);
             }
-          } else if (v && typeof v === "object" && depth < 2) {
+          } else if (v && typeof v === "object") {
             scan(v, path + "." + k, depth + 1);
           }
         }
       }
       try { scan(window, "window", 0); } catch(e) {}
 
-      // Targeted probe: an earlier error revealed a window.*.clue.sos array
-      // that's circularly referenced — dump it directly and safely.
-      try {
-        for (const k of Object.keys(window)) {
-          let v;
-          try { v = window[k]; } catch(e) { continue; }
-          if (v && typeof v === "object" && v.clue && typeof v.clue === "object" && Array.isArray(v.clue.sos)) {
-            hits["window." + k + ".clue.sos"] = v.clue.sos.slice(0, 12).map(shallowPrimitiveCopy);
-          }
-          if (v && typeof v === "object" && v.sos !== undefined && Array.isArray(v.sos)) {
-            hits["window." + k + ".sos"] = v.sos.slice(0, 12).map(shallowPrimitiveCopy);
-          }
-        }
-      } catch(e) {}
-
-      // Circular-safe stringify as a backstop in case anything slips through
       function safeStringify(obj) {
         const cache = new Set();
         return JSON.stringify(obj, (key, value) => {
@@ -333,7 +323,26 @@ async function readLeaderboard() {
           return value;
         });
       }
-      console.log("LEADERBOARD_DEBUG scan:", safeStringify(hits).slice(0, 4000));
+      console.log("LEADERBOARD_DEBUG nk-scan:", safeStringify(found).slice(0, 6000));
+
+      // Auto-select: prefer the smallest matching array (<=10 items), since
+      // a real top-10 board can't have more than 10 entries. This lets the
+      // bot self-heal immediately instead of waiting on another manual round.
+      const candidateKeys = Object.keys(found);
+      let best = null, bestLen = Infinity, bestKey = null;
+      for (const key of candidateKeys) {
+        const arr = found[key];
+        if (arr.length > 0 && arr.length <= 10 && arr.length < bestLen) {
+          best = arr; bestLen = arr.length; bestKey = key;
+        }
+      }
+      if (best) {
+        const outSnakes = best.map(s => ({
+          name: s.nk || "(no name)",
+          score: calcScore(s.sct, s.fam !== undefined ? s.fam : s.sc)
+        }));
+        return { source: "auto:" + bestKey, snakes: outSnakes };
+      }
 
       return { source: "none", snakes: [] };
     });
