@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const { chromium } = require("playwright");
+const https = require("https");
 const http = require("http");
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
@@ -14,18 +14,20 @@ http.createServer((req, res) => {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // ─────────────────────────────────────
-// 🔑 CONFIG
+// 🔑 CONFIG — paste your values here
 // ─────────────────────────────────────
-const T1              = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.GsKrp6.d";
-const T2              = "DIGgLq-w29wsNfLDqEindqCFdwmBKxc_0BD78";
+const T1              = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.";
+const T2              = "G7sO1p.kDNz5V-63VBYkU_6vGTwUxmH513Ivzv6r4TJ-s";
 const TOKEN           = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 const ALERT_INTERVAL  = 20000;
 
-// Server 8828 IP — used to auto-connect to the right server
-const SERVER_IP       = "148.113.20.151";
+// 🌐 JSONBin — same ID/key as in the website
+const JSONBIN_ID  = "6aae2296ffd5d16053186ae8";
+const JSONBIN_KEY = "$2a$10$acwdRLjy1l3auJoKl0tj2.pv8CkwuBGAyZNTPbEWJtT7CyHkD33O2";
+const DATA_URL    = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}/latest`;
 
 let activePlayers    = new Set();
 const alerted30      = new Set();
@@ -33,21 +35,15 @@ const alerted80      = new Set();
 const jsr20          = new Set();
 const jsr50          = new Set();
 let leaderboardMessage = null;
-let channel, kingChannel;
-let browser = null;
-let page = null;
 
 // ──────────────────────────────────────
 // 🏷️ TEAM DETECTION
 // ──────────────────────────────────────
 function buildPatterns(tag) {
   const t = tag.toLowerCase();
-  return [
-    t, `{${t}}`, `[${t}]`, `(${t})`, `<${t}>`, `|${t}|`,
-    `-${t}-`, `.${t}.`, `_${t}_`, `~${t}~`, `«${t}»`,
-    `${t}.`, `.${t}`, `${t}_`, `_${t}`, `${t}-`, `-${t}`,
-    `${t}/`, `/${t}`, `${t}#`, `#${t}`,
-  ];
+  return [t,`{${t}}`,`[${t}]`,`(${t})`,`<${t}>`,`|${t}|`,`-${t}-`,`.${t}.`,
+    `_${t}_`,`~${t}~`,`«${t}»`,`${t}.`,`.${t}`,`${t}_`,`_${t}`,`${t}-`,
+    `-${t}`,`${t}/`,`/${t}`,`${t}#`,`#${t}`];
 }
 const TEAMS = {
   JSR:  { patterns: buildPatterns("jsr"),  emoji: "🟠" },
@@ -56,9 +52,9 @@ const TEAMS = {
   LWK:  { patterns: buildPatterns("lwk"),  emoji: "🟡" },
   IND:  { patterns: buildPatterns("ind"),  emoji: "🟢" },
 };
-function normalizeName(n) { return n.toLowerCase().replace(/\s+/g, ""); }
+function normalizeName(n) { return n.toLowerCase().replace(/\s+/g,""); }
 function normalizeSpaced(n) {
-  return n.toLowerCase().replace(/\b([a-z])\s+(?=[a-z]\b)/g, "$1").replace(/\s+/g, "");
+  return n.toLowerCase().replace(/\b([a-z])\s+(?=[a-z]\b)/g,"$1").replace(/\s+/g,"");
 }
 function detectTeam(name) {
   const n1 = normalizeName(name), n2 = normalizeSpaced(name);
@@ -68,23 +64,53 @@ function detectTeam(name) {
 }
 function isJSR(name) { return detectTeam(name) === "JSR"; }
 function truncateName(name, max = 22) {
-  return name.length <= max ? name : name.slice(0, max - 1) + "…";
+  return name.length <= max ? name : name.slice(0, max-1) + "…";
+}
+
+// ──────────────────────────────────────
+// 🌐 FETCH JSON from GitHub Pages
+// ──────────────────────────────────────
+function fetchJSON(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: {
+        "User-Agent": "JSR-Bot/1.0",
+        "Cache-Control": "no-cache",
+        "X-Master-Key": JSONBIN_KEY,
+      }
+    }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302)
+        return fetchJSON(res.headers.location).then(resolve).catch(reject);
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          // JSONBin wraps data in { record: { players: [...] } }
+          const players = json?.record?.players || json?.players || json;
+          resolve(Array.isArray(players) ? players : []);
+        } catch(e) { reject(new Error("Invalid JSON")); }
+      });
+    });
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error("Timeout")); });
+    req.on("error", reject);
+  });
 }
 
 // ──────────────────────────────────────
 // 🏆 LEADERBOARD EMBED
 // ──────────────────────────────────────
 function buildLeaderboardEmbed(players) {
-  const top10 = players.slice(0, 10);
-  const totalScore = players.reduce((s, p) => s + p.score, 0);
+  const top10 = players.slice(0,10);
+  const totalScore = players.reduce((s,p) => s+p.score, 0);
   const now = new Date();
-  const dateStr = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
-  const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
-  const ICONS = ["🥇", "🥈", "🥉"];
+  const dateStr = now.toLocaleDateString("en-GB", { timeZone:"Asia/Kolkata", day:"2-digit", month:"2-digit", year:"numeric" });
+  const timeStr = now.toLocaleTimeString("en-IN", { timeZone:"Asia/Kolkata", hour:"2-digit", minute:"2-digit", hour12:true });
+  const ICONS = ["🥇","🥈","🥉"];
   let board = "";
-  top10.forEach((p, i) => {
+  top10.forEach((p,i) => {
     const team = detectTeam(p.name);
-    board += `${ICONS[i] || `#${i+1}`} ${team ? TEAMS[team].emoji + " " : ""}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
+    board += `${ICONS[i]||`#${i+1}`} ${team?TEAMS[team].emoji+" ":""}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
   });
   return {
     color: 0x7b2fff,
@@ -93,8 +119,8 @@ function buildLeaderboardEmbed(players) {
     description: board || "Waiting for data...",
     fields: [
       { name: "💯 Total Score", value: totalScore.toLocaleString(), inline: true },
-      { name: "👥 Players", value: String(players.length), inline: true },
-      { name: "🕐 Updated", value: "Just now", inline: true },
+      { name: "👥 Players",     value: String(players.length),      inline: true },
+      { name: "🕐 Updated",     value: "Just now",                  inline: true },
       { name: "🏷️ Teams", value: "🟠 JSR  🔵 SMT  🔴 DINO  🟡 LWK  🟢 IND", inline: false },
     ],
     footer: { text: `Powered by JSR Gaming  •  Last Refresh | ${dateStr} ${timeStr}` },
@@ -104,7 +130,7 @@ function buildLeaderboardEmbed(players) {
 // ──────────────────────────────────────
 // ⚔️ ALERTS
 // ──────────────────────────────────────
-async function processAlerts(players) {
+async function processAlerts(players, channel) {
   const currentNames = new Set(players.map(p => p.name));
   for (const name of [...activePlayers]) {
     if (!currentNames.has(name)) {
@@ -120,6 +146,7 @@ async function processAlerts(players) {
       if (!isJSR(p.name)) {
         if (p.score >= 30000 && !alerted30.has(p.name)) {
           alerted30.add(p.name);
+          console.log(`🚨 Enemy: ${p.name} (${p.score})`);
           await channel.send({ content: ALERT_ROLE, embeds: [{ color: 0xff2d2d, title: "🚨 TARGET ACQUIRED",
             description: `━━━━━━━━━━━━━━━━━━\n🎯 ENEMY LOCKED\n\n🐍 Name   : ${p.name}\n📏 Length : ${p.score.toLocaleString()}\n\n⚔️ MISSION\n• Surround\n• Trap\n• Eliminate\n━━━━━━━━━━━━━━━━━━`,
             footer: { text: "⚡ JSR Tactical System" }, timestamp: new Date() }] });
@@ -144,260 +171,8 @@ async function processAlerts(players) {
             footer: { text: "⚡ JSR Emergency Protocol" }, timestamp: new Date() }] });
         }
       }
-    } catch (err) { console.log("Alert error:", err?.message); }
+    } catch(err) { console.log("Alert error:", err?.message); }
   }
-}
-
-// ──────────────────────────────────────
-// 🌐 PLAYWRIGHT — Read leaderboard from game globals
-// ──────────────────────────────────────
-async function startBrowser() {
-  console.log("🌐 Launching headless Chrome...");
-  browser = await chromium.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ]
-  });
-
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    viewport: { width: 1280, height: 720 },
-  });
-
-  page = await context.newPage();
-
-  // Capture browser console logs in Railway logs
-  page.on("console", msg => {
-    const text = msg.text();
-    if (text.includes("LEADERBOARD_DEBUG") || text.includes("Server set")) {
-      console.log("🌐 Browser:", text.substring(0, 2000));
-    }
-  });
-
-  // Navigate directly to slither.io with server 8828 pre-selected
-  console.log("🐍 Opening slither.io on server 8828...");
-  await page.goto(`https://slither.io`, { waitUntil: "networkidle", timeout: 30000 });
-  console.log("✅ Page loaded!");
-
-  // Wait for game scripts to load
-  await page.waitForTimeout(2000);
-
-  // Inject server override BEFORE clicking play
-  try {
-    await page.evaluate((ip) => {
-      if (window.bso) {
-        window.bso.ip = ip;
-        window.bso.po = 444;
-        console.log("Server set to:", ip);
-      }
-    }, SERVER_IP);
-    console.log("✅ Server override injected");
-  } catch(e) {
-    console.log("⚠️ Server override failed:", e.message);
-  }
-
-  // Click play button
-  try {
-    await page.click(".btnt.sadg1", { timeout: 5000 });
-    console.log("✅ Clicked Play!");
-  } catch(e) {
-    try {
-      await page.click("#play-btn", { timeout: 3000 });
-    } catch(e2) {
-      console.log("⚠️ Could not click play, trying keyboard...");
-      await page.keyboard.press("Enter");
-    }
-  }
-
-  // Wait for game to start
-  await page.waitForTimeout(5000);
-  console.log("✅ Game should be running!");
-}
-
-async function readLeaderboard() {
-  if (!page) return [];
-  try {
-    const data = await page.evaluate(() => {
-      // fpsls for score calculation
-      const fpsls = [0];
-      let r = 1;
-      for (let i = 1; i < 21000; i++) { fpsls.push(r); r += 1/(i+9); }
-      function calcScore(sct, sc) {
-        if (!sct || sct >= fpsls.length) return Math.round((sc||0)*15);
-        return Math.floor(15*(fpsls[sct] + sc/(sct-fpsls[sct]+1) - 1) - 5);
-      }
-
-      // Try the historically-known globals first, in case they still exist
-      // on this particular deploy.
-      const snakes = [];
-      if (window.gla && Array.isArray(window.gla) && window.gla.length) {
-        for (const s of window.gla) {
-          if (!s) continue;
-          snakes.push({ name: s.nk || "(no name)", score: calcScore(s.sct, s.fam || s.sc) });
-        }
-        if (snakes.length > 0) return { source: "gla", snakes };
-      }
-      if (window.top_scores && Array.isArray(window.top_scores) && window.top_scores.length) {
-        for (const s of window.top_scores) {
-          if (!s) continue;
-          snakes.push({ name: s.nk || "(no name)", score: calcScore(s.sct, s.fam || s.sc) });
-        }
-        if (snakes.length > 0) return { source: "top_scores", snakes };
-      }
-
-      // Targeted deep search: the game's own window.slithers objects use
-      // "nk" as the nickname field. That's a real, confirmed convention —
-      // not a guess — so instead of a generic "has a string and a number"
-      // heuristic (which false-matched the server-cluster list earlier),
-      // hunt specifically for small arrays whose objects carry "nk".
-      // Known large DOM/browser-API roots are skipped so we don't walk
-      // the whole page.
-      const SKIP_TOP_LEVEL = new Set([
-        "document","navigator","location","history","screen","console",
-        "localStorage","sessionStorage","indexedDB","crypto","performance",
-        "customElements","caches","chrome","external","frames","parent",
-        "top","self","window","opener","closed","frameElement",
-        "visualViewport","speechSynthesis","applicationCache","styleMedia",
-        "trustedTypes","cookieStore","documentPictureInPicture","event"
-      ]);
-      const seenObjs = new WeakSet();
-      const seenArrays = new WeakSet();
-      const found = {};
-      let visited = 0;
-
-      function shallowPrimitiveCopy(obj) {
-        const out = {};
-        for (const k of Object.keys(obj)) {
-          let v;
-          try { v = obj[k]; } catch(e) { continue; }
-          if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
-        }
-        return out;
-      }
-
-      function isCandidateArray(arr) {
-        if (!Array.isArray(arr) || arr.length < 1 || arr.length > 15) return false;
-        const first = arr[0];
-        if (!first || typeof first !== "object") return false;
-        const keys = Object.keys(first);
-        if (keys.length > 15) return false; // exclude the big ~80-key slithers physics objects
-        return typeof first.nk === "string";
-      }
-
-      function scan(obj, path, depth) {
-        if (depth > 6 || visited > 20000 || !obj || typeof obj !== "object") return;
-        if (seenObjs.has(obj)) return;
-        seenObjs.add(obj);
-        visited++;
-        let keys;
-        try { keys = Object.keys(obj); } catch(e) { return; }
-        for (const k of keys) {
-          if (depth === 0 && SKIP_TOP_LEVEL.has(k)) continue;
-          if (k.startsWith("on")) continue; // event-handler globals
-          let v;
-          try { v = obj[k]; } catch(e) { continue; }
-          if (typeof v === "function") continue;
-          if (Array.isArray(v)) {
-            if (isCandidateArray(v) && !seenArrays.has(v)) {
-              seenArrays.add(v);
-              found[path + "." + k] = v.slice(0, 12).map(shallowPrimitiveCopy);
-            }
-          } else if (v && typeof v === "object") {
-            scan(v, path + "." + k, depth + 1);
-          }
-        }
-      }
-      try { scan(window, "window", 0); } catch(e) {}
-
-      function safeStringify(obj) {
-        const cache = new Set();
-        return JSON.stringify(obj, (key, value) => {
-          if (typeof value === "object" && value !== null) {
-            if (cache.has(value)) return "[circular]";
-            cache.add(value);
-          }
-          return value;
-        });
-      }
-      console.log("LEADERBOARD_DEBUG nk-scan:", safeStringify(found).slice(0, 6000));
-
-      // Auto-select: prefer the smallest matching array (<=10 items), since
-      // a real top-10 board can't have more than 10 entries. This lets the
-      // bot self-heal immediately instead of waiting on another manual round.
-      const candidateKeys = Object.keys(found);
-      let best = null, bestLen = Infinity, bestKey = null;
-      for (const key of candidateKeys) {
-        const arr = found[key];
-        if (arr.length > 0 && arr.length <= 10 && arr.length < bestLen) {
-          best = arr; bestLen = arr.length; bestKey = key;
-        }
-      }
-      if (best) {
-        const outSnakes = best.map(s => ({
-          name: s.nk || "(no name)",
-          score: calcScore(s.sct, s.fam !== undefined ? s.fam : s.sc)
-        }));
-        return { source: "auto:" + bestKey, snakes: outSnakes };
-      }
-
-      return { source: "none", snakes: [] };
-    });
-
-    const source = data.source || "none";
-    const snakes = data.snakes || data;
-    if (source !== "none") console.log(`📋 Source: ${source}`);
-
-    return snakes.filter(p => p.score > 0).sort((a, b) => b.score - a.score);
-  } catch(e) {
-    console.log("⚠️ Read error:", e.message);
-    return [];
-  }
-}
-
-async function runLoop() {
-  // Auto-respawn if snake died (window.slither becomes null)
-  try {
-    const isDead = await page.evaluate(() => !window.slither || window.slither === null);
-    if (isDead) {
-      console.log("🔄 Snake died, respawning...");
-      await page.evaluate((ip) => {
-        if (window.bso) { window.bso.ip = ip; window.bso.po = 444; }
-      }, SERVER_IP).catch(() => {});
-      await page.click(".btnt.sadg1", { timeout: 3000 }).catch(async () => {
-        await page.keyboard.press("Enter");
-      });
-      await page.waitForTimeout(3000);
-    }
-  } catch(e) {}
-
-  const players = await readLeaderboard();
-
-  if (!players.length) {
-    console.log(`⚠️ ${new Date().toLocaleTimeString()} — No players read from browser`);
-    return;
-  }
-
-  console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players`);
-  players.slice(0, 3).forEach((p, i) => console.log(`  #${i+1} ${p.name} — ${p.score}`));
-
-  try {
-    const embed = buildLeaderboardEmbed(players);
-    if (leaderboardMessage) {
-      await leaderboardMessage.edit({ embeds: [embed] });
-    } else {
-      leaderboardMessage = await kingChannel.send({ embeds: [embed] });
-      console.log("🏆 Leaderboard created!");
-    }
-  } catch(e) {
-    console.log("❌ Discord error:", e.message);
-    leaderboardMessage = null;
-  }
-
-  await processAlerts(players);
 }
 
 // ──────────────────────────────────────
@@ -406,8 +181,8 @@ async function runLoop() {
 client.once("ready", async () => {
   console.log(`✅ Discord bot ready: ${client.user.tag}`);
 
-  channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID:", e.message); return null; });
-  kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => { console.log("❌ KING_CHANNEL_ID:", e.message); return null; });
+  const channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID:", e.message); return null; });
+  const kingChannel = await client.channels.fetch(KING_CHANNEL_ID).catch(e => { console.log("❌ KING_CHANNEL_ID:", e.message); return null; });
 
   if (!channel || !kingChannel) { console.log("❌ Channels not found!"); return; }
 
@@ -419,17 +194,37 @@ client.once("ready", async () => {
     console.log("💓 Heartbeat sent");
   }, 3 * 60 * 60 * 1000);
 
-  // Start browser
-  try {
-    await startBrowser();
-  } catch(e) {
-    console.log("❌ Browser error:", e.message);
-    return;
+  async function runLoop() {
+    let players;
+    try {
+      players = await fetchJSON(DATA_URL);
+      if (!Array.isArray(players)) throw new Error("Not an array");
+    } catch(e) {
+      console.log("❌ Fetch failed:", e.message);
+      return;
+    }
+
+    if (!players.length) { console.log("⚠️ No players"); return; }
+    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players`);
+
+    try {
+      const embed = buildLeaderboardEmbed(players);
+      if (leaderboardMessage) {
+        await leaderboardMessage.edit({ embeds: [embed] });
+      } else {
+        leaderboardMessage = await kingChannel.send({ embeds: [embed] });
+        console.log("🏆 Leaderboard created!");
+      }
+    } catch(e) {
+      console.log("❌ Discord error:", e.message);
+      leaderboardMessage = null;
+    }
+
+    await processAlerts(players, channel);
   }
 
-  // Run loop every 20 seconds
+  await runLoop();
   setInterval(runLoop, ALERT_INTERVAL);
-  await runLoop(); // Run immediately
 });
 
 client.login(TOKEN);
