@@ -2,11 +2,6 @@
   "name": "jsr-bot",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "start": "npx playwright install chromium --with-deps && node index.js"
-  },
-  "dependencies": {
-    "discord.js": "^14.14.1",
-    "playwright": "^1.44.0"
-  }
+  "scripts": { "start": "node index.js" },
+  "dependencies": { "discord.js": "^14.14.1" }
 }
