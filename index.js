@@ -177,7 +177,7 @@ async function startBrowser() {
 
   // Set server via bso BEFORE clicking play — confirmed working method
   try {
-    await page.evaluate((ip, port) => {
+    await page.evaluate(({ip, port}) => {
       if (typeof bso !== "undefined") {
         bso.ip = ip;
         bso.po = port;
@@ -189,7 +189,7 @@ async function startBrowser() {
       } else {
         console.log("bso not found!");
       }
-    }, SERVER_IP, SERVER_PORT);
+    }, {ip: SERVER_IP, port: SERVER_PORT});
   } catch(e) {
     console.log("⚠️ Server override error:", e.message);
   }
@@ -234,35 +234,61 @@ async function readLeaderboard() {
         return Math.floor(15*(fpsls[sct] + fam/(sct-fpsls[sct]+1) - 1) - 5);
       }
 
-      // gla = global leaderboard array — the TOP 10 shown in game UI
-      if (typeof gla !== "undefined" && Array.isArray(gla) && gla.length > 0) {
-        const snakes = gla.map(s => {
-          if (!s) return null;
-          const score = calcScore(s.sct, s.fam);
-          return { name: s.nk || "(no name)", score };
-        }).filter(Boolean);
-        if (snakes.length > 0) return { source: "gla", snakes };
+      // Scan ALL window globals for an array of objects that look like leaderboard entries
+      // (has a name-like field and a score-like field)
+      const nameFields = ["nk", "name", "nick", "nickname"];
+      const scoreFields = ["fam", "sc", "score", "pts", "len"];
+
+      let bestMatch = null;
+      let bestKey = null;
+
+      for (const key of Object.getOwnPropertyNames(window)) {
+        if (key.length > 20) continue;
+        let val;
+        try { val = window[key]; } catch(e) { continue; }
+        if (!Array.isArray(val) || val.length === 0 || val.length > 15) continue;
+
+        const first = val.find(v => v && typeof v === "object");
+        if (!first) continue;
+
+        const hasName = nameFields.some(f => f in first);
+        const hasScore = scoreFields.some(f => f in first);
+
+        if (hasName || hasScore) {
+          bestMatch = val;
+          bestKey = key;
+          break;
+        }
       }
 
-      // window.gla fallback
-      if (window.gla && Array.isArray(window.gla) && window.gla.length > 0) {
-        const snakes = window.gla.map(s => {
+      if (bestMatch) {
+        const nameField = nameFields.find(f => f in (bestMatch.find(v=>v)||{})) || "nk";
+        const snakes = bestMatch.map(s => {
           if (!s) return null;
-          const score = calcScore(s.sct, s.fam);
-          return { name: s.nk || "(no name)", score };
+          const name = s[nameField] || s.nk || s.name || "(no name)";
+          let score = 0;
+          if ("fam" in s && "sct" in s) score = calcScore(s.sct, s.fam);
+          else if ("sc" in s) score = Math.round(s.sc);
+          else if ("score" in s) score = Math.round(s.score);
+          else if ("pts" in s) score = Math.round(s.pts);
+          return { name, score };
         }).filter(Boolean);
-        if (snakes.length > 0) return { source: "window.gla", snakes };
+
+        if (snakes.length > 0) return { source: bestKey, snakes };
       }
 
-      // Debug dump
+      // Debug: list all short-named array globals with their first item's keys
       const debug = {};
-      for (const k of ["gla", "top_scores", "leaderboard", "lb"]) {
-        try {
-          const v = eval(k);
-          if (v !== undefined) debug[k] = Array.isArray(v) ? `Array(${v.length})` : typeof v;
-        } catch(e) { debug[k] = "undefined"; }
+      for (const key of Object.getOwnPropertyNames(window)) {
+        if (key.length > 15) continue;
+        let val;
+        try { val = window[key]; } catch(e) { continue; }
+        if (Array.isArray(val) && val.length > 0 && val.length <= 15) {
+          const first = val.find(v => v && typeof v === "object");
+          if (first) debug[key] = Object.keys(first).slice(0, 10).join(",");
+        }
       }
-      console.log("DEBUG gla-scan:", JSON.stringify(debug));
+      console.log("ARRAY_SCAN:", JSON.stringify(debug));
 
       return { source: "none", snakes: [] };
     });
@@ -283,9 +309,9 @@ async function runLoop() {
 
     if (isDead) {
       console.log("🔄 Snake died, respawning...");
-      await page.evaluate((ip, port) => {
+      await page.evaluate(({ip, port}) => {
         if (typeof bso !== "undefined") { bso.ip = ip; bso.po = port; }
-      }, SERVER_IP, SERVER_PORT).catch(() => {});
+      }, {ip: SERVER_IP, port: SERVER_PORT}).catch(() => {});
       await page.click(".btnt.sadg1", { timeout: 3000 }).catch(async () => {
         await page.keyboard.press("Enter").catch(() => {});
       });
