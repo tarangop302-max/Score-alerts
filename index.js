@@ -64,74 +64,105 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 HEADLESS SLITHER INTERCEPTOR
+// 🌐 HEADLESS SLITHER INTERCEPTOR (AUTO-SPAWN FIX)
 // ──────────────────────────────────────
 async function startBrowserSession() {
   console.log("🚀 Launching Headless Browser Interceptor...");
 
-  const browser = await puppeteer.launch({
-    headless: "new",
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--disable-gpu"
-    ]
-  });
+  try {
+    const browser = await puppeteer.launch({
+      headless: "new",
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--disable-gpu"
+      ]
+    });
 
-  const page = await browser.newPage();
-  await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
+    const page = await browser.newPage();
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
-  // Expose function to extract leaderboard array from page context
-  await page.exposeFunction("onLeaderboardUpdate", (players) => {
-    latestPlayers = players;
-  });
-
-  // Inject script to force connection to Server 8828 (148.113.20.151:444)
-  await page.goto("http://slither.io", { waitUntil: "domcontentloaded" });
-
-  await page.evaluate(() => {
-    // Force target server 8828 IP
-    window.bServerIp = "148.113.20.151";
-    window.bServerPort = 444;
-
-    // Observe leaderboard array updates in client JS state
-    setInterval(() => {
-      if (window.leaderboard && Array.isArray(window.leaderboard)) {
-        const parsed = window.leaderboard.map(p => ({
-          name: p.name || "(Anonymouse)",
-          score: Math.floor((p.s - 15) / 10) || 0
-        }));
-        window.onLeaderboardUpdate(parsed);
+    // Expose Node bridge function to pass page state back to index.js
+    await page.exposeFunction("onLeaderboardUpdate", (players) => {
+      if (players && players.length > 0) {
+        latestPlayers = players;
       }
-    }, 1000);
-  });
+    });
 
-  console.log("⚡ Headless Browser Connected to Slither Server 8828.");
+    // Open Slither.io client
+    await page.goto("http://slither.io", { waitUntil: "domcontentloaded", timeout: 60000 });
 
-  browser.on("disconnected", () => {
-    console.log("Browser disconnected. Restarting browser session in 5s...");
+    // Target Server 8828 & Auto-play to initialize WebSocket data stream
+    await page.evaluate(() => {
+      window.bServerIp = "148.113.20.151";
+      window.bServerPort = 444;
+
+      // Trigger Slither internal spawn call
+      function forceJoin() {
+        if (typeof window.play_slither === "function") {
+          window.play_slither();
+        } else {
+          const btn = document.querySelector("#playh .nsi") || document.getElementById("playbtn");
+          if (btn) btn.click();
+        }
+      }
+
+      forceJoin();
+
+      // Read internal leaderboard variables periodically
+      setInterval(() => {
+        // Fallback checks across Slither global memory properties
+        const rawBoard = window.leaderboard || window.lb_p || window.top_snakes || [];
+
+        if (Array.isArray(rawBoard) && rawBoard.length > 0) {
+          const parsed = rawBoard.map(p => {
+            const rawName = p.nick || p.name || p.nk || "(Anonymouse)";
+            const rawLen = p.s || p.score || p.len || 15;
+            return {
+              name: String(rawName).trim(),
+              score: Math.max(0, Math.floor((rawLen - 15) / 10))
+            };
+          });
+
+          window.onLeaderboardUpdate(parsed);
+        } else {
+          // Re-attempt join if player died or got bumped to main menu
+          forceJoin();
+        }
+      }, 1000);
+    });
+
+    console.log("⚡ Headless Browser Connected & Active on Server 8828.");
+
+    browser.on("disconnected", () => {
+      console.log("Browser session lost. Restarting in 5s...");
+      setTimeout(startBrowserSession, 5000);
+    });
+  } catch (err) {
+    console.error("Browser launch error:", err.message);
     setTimeout(startBrowserSession, 5000);
-  });
+  }
 }
 
 // ──────────────────────────────────────
 // 🏆 LEADERBOARD EMBED
 // ──────────────────────────────────────
 function buildLeaderboardEmbed(players) {
-  const top10 = players.slice(0,10);
-  const totalScore = players.reduce((s,p) => s+p.score, 0);
+  const top10 = players.slice(0, 10);
+  const totalScore = players.reduce((s, p) => s + p.score, 0);
   const now = new Date();
-  const dateStr = now.toLocaleDateString("en-GB", { timeZone:"Asia/Kolkata", day:"2-digit", month:"2-digit", year:"numeric" });
-  const timeStr = now.toLocaleTimeString("en-IN", { timeZone:"Asia/Kolkata", hour:"2-digit", minute:"2-digit", hour12:true });
-  const ICONS = ["🥇","🥈","🥉"];
+  const dateStr = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
+  const ICONS = ["🥇", "🥈", "🥉"];
   let board = "";
-  top10.forEach((p,i) => {
+  top10.forEach((p, i) => {
     const team = detectTeam(p.name);
-    board += `${ICONS[i]||`#${i+1}`} ${team?TEAMS[team].emoji+" ":""}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
+    board += `${ICONS[i] || `#${i + 1}`} ${team ? TEAMS[team].emoji + " " : ""}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
   });
+
   return {
     color: 0x7b2fff,
     author: { name: "🇮🇳 Slither Server 8828" },
@@ -209,11 +240,20 @@ client.once("ready", async () => {
   await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
   console.log("✅ Startup message sent!");
 
+  setInterval(() => {
+    channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
+    console.log("💓 Heartbeat sent");
+  }, 3 * 60 * 60 * 1000);
+
   async function runLoop() {
     const players = latestPlayers;
 
-    if (!players.length) { console.log("⚠️ No players yet from game connection"); return; }
-    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players`);
+    if (!players.length) { 
+      console.log("⚠️ Waiting for leaderboard array from Slither session..."); 
+      return; 
+    }
+
+    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players loaded`);
 
     try {
       const embed = buildLeaderboardEmbed(players);
@@ -221,10 +261,10 @@ client.once("ready", async () => {
         await leaderboardMessage.edit({ embeds: [embed] });
       } else {
         leaderboardMessage = await kingChannel.send({ embeds: [embed] });
-        console.log("🏆 Leaderboard created!");
+        console.log("🏆 Leaderboard message posted!");
       }
     } catch(e) {
-      console.log("❌ Discord error:", e.message);
+      console.log("❌ Discord edit error:", e.message);
       leaderboardMessage = null;
     }
 
