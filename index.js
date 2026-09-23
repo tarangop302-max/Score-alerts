@@ -64,7 +64,7 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 BROWSER ENGINE INTERCEPTOR
+// 🌐 WEBSOCKET & ENGINE INTERCEPTOR
 // ──────────────────────────────────────
 async function startBrowserSession() {
   console.log("🚀 Launching Headless Browser Interceptor...");
@@ -78,7 +78,10 @@ async function startBrowserSession() {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-accelerated-2d-canvas",
-        "--disable-gpu"
+        "--disable-gpu",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding"
       ]
     });
 
@@ -92,10 +95,90 @@ async function startBrowserSession() {
       }
     });
 
+    // Un-throttle headless execution & hook WebSocket before page load
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(document, "hidden", { value: false, writable: false });
+      Object.defineProperty(document, "visibilityState", { value: "visible", writable: false });
+      window.requestAnimationFrame = (cb) => setTimeout(cb, 1000 / 60);
+
+      function parseBinaryLeaderboard(u) {
+        if (u[0] !== 108 || u.length < 8) return null;
+
+        for (let startOffset of [3, 4, 5, 6, 7, 2, 1]) {
+          let p = startOffset;
+          let players = [];
+          let valid = true;
+
+          while (p < u.length) {
+            if (p + 3 > u.length) { valid = false; break; }
+
+            let rawVal = (u[p] << 8) | u[p + 1];
+            p += 2;
+
+            let nameLen = u[p++];
+            if (nameLen > 30 && p < u.length) {
+              p++;
+              nameLen = u[p - 1];
+            }
+
+            if (nameLen < 0 || nameLen > 35 || p + nameLen > u.length) {
+              valid = false;
+              break;
+            }
+
+            let nameBytes = u.subarray(p, p + nameLen);
+            p += nameLen;
+
+            let name = "";
+            try {
+              name = new TextDecoder("utf-8").decode(nameBytes);
+            } catch(e) {
+              for (let i = 0; i < nameBytes.length; i++) name += String.fromCharCode(nameBytes[i]);
+            }
+            name = name.trim() || "(Anonymouse)";
+
+            // Convert raw binary mass integer into exact score formula
+            let score = rawVal;
+            if (rawVal > 0) {
+              score = Math.floor(15 * (rawVal - 1) / 10);
+              if (score <= 0) score = rawVal;
+            }
+
+            players.push({ name, score });
+          }
+
+          if (valid && players.length >= 3 && players.length <= 10) {
+            return players;
+          }
+        }
+        return null;
+      }
+
+      const OriginalWebSocket = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        const ws = new OriginalWebSocket(url, protocols);
+
+        ws.addEventListener("message", (evt) => {
+          if (evt.data instanceof ArrayBuffer) {
+            const u = new Uint8Array(evt.data);
+            if (u[0] === 108) {
+              const res = parseBinaryLeaderboard(u);
+              if (res && res.length > 0 && window.onLeaderboardUpdate) {
+                window.onLeaderboardUpdate(res);
+              }
+            }
+          }
+        });
+
+        return ws;
+      };
+      window.WebSocket.prototype = OriginalWebSocket.prototype;
+    });
+
     // Navigate to slither origin
     await page.goto("https://slither.io", { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // Inject engine hook & trigger play on target server
+    // Inject server force join + secondary runtime check
     await page.evaluate(() => {
       window.bServerIp = "148.113.20.151";
       window.bServerPort = 444;
@@ -112,24 +195,18 @@ async function startBrowserSession() {
       forceJoin();
       setInterval(forceJoin, 5000);
 
-      // Extract exact scores from Slither's native global engine state
+      // Fallback engine inspect
       setInterval(() => {
         const nativeMembers = window.members || window.lb_p || window.leaderboard;
         if (Array.isArray(nativeMembers) && nativeMembers.length > 0) {
           const parsed = nativeMembers.map(m => {
             let name = m.nk || m.nick || m.name || m.n || "(Anonymouse)";
             let score = 0;
-
-            // Use exact computed mass if available
-            if (typeof m.s === "number" && m.s > 0) {
-              score = m.s;
-            } else if (typeof m.score === "number" && m.score > 0) {
-              score = m.score;
-            } else if (m.sct && window.fpsls && window.fmlts) {
-              // Slither exact score lookup formula
+            if (typeof m.s === "number" && m.s > 0) score = m.s;
+            else if (typeof m.score === "number" && m.score > 0) score = m.score;
+            else if (m.sct && window.fpsls && window.fmlts) {
               score = Math.floor(15 * (window.fpsls[m.sct] + (m.fam || 0) / window.fmlts[m.sct] - 1) - 5);
             }
-
             return {
               name: String(name).trim() || "(Anonymouse)",
               score: Math.max(0, Math.floor(score))
@@ -143,7 +220,7 @@ async function startBrowserSession() {
       }, 1000);
     });
 
-    console.log("⚡ Engine Interceptor active on Server 8828 (https://slither.io).");
+    console.log("⚡ Network & Engine Interceptor active on Server 8828 (https://slither.io).");
 
     browser.on("disconnected", () => {
       console.log("Browser disconnected. Restarting in 5s...");
