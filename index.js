@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const WebSocket = require("ws");
+const puppeteer = require("puppeteer");
 const http = require("http");
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
@@ -22,10 +22,7 @@ const TOKEN           = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
-const ALERT_INTERVAL  = 20000;
-
-// Target Server 8828
-const SERVER_URL = "ws://148.113.20.151:444/slither";
+const ALERT_INTERVAL  = 15000;
 
 let activePlayers      = new Set();
 const alerted30        = new Set();
@@ -67,110 +64,57 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🎮 GAME CONNECTION (WITH HANDSHAKE RESPONSE)
+// 🌐 HEADLESS SLITHER INTERCEPTOR
 // ──────────────────────────────────────
-function startGameConnection() {
-  console.log(`Connecting to Slither Server 8828 (${SERVER_URL})...`);
+async function startBrowserSession() {
+  console.log("🚀 Launching Headless Browser Interceptor...");
 
-  const ws = new WebSocket(SERVER_URL, {
-    headers: {
-      "Origin": "http://slither.io",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Cache-Control": "no-cache",
-      "Pragma": "no-cache"
-    }
+  const browser = await puppeteer.launch({
+    headless: "new",
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--disable-gpu"
+    ]
   });
 
-  let pingInterval = null;
+  const page = await browser.newPage();
+  await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
-  ws.on("open", () => {
-    console.log("⚡ Connected to Slither Server 8828. Initiating handshake...");
+  // Expose function to extract leaderboard array from page context
+  await page.exposeFunction("onLeaderboardUpdate", (players) => {
+    latestPlayers = players;
+  });
 
-    // Step 1: Send client handshake byte (1 = standard mode)
-    ws.send(Uint8Array.from([1]));
+  // Inject script to force connection to Server 8828 (148.113.20.151:444)
+  await page.goto("http://slither.io", { waitUntil: "domcontentloaded" });
 
-    // Start 250ms Ping Heartbeat to keep connection open
-    pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(Uint8Array.from([251])); // Opcode 251 (Ping)
+  await page.evaluate(() => {
+    // Force target server 8828 IP
+    window.bServerIp = "148.113.20.151";
+    window.bServerPort = 444;
+
+    // Observe leaderboard array updates in client JS state
+    setInterval(() => {
+      if (window.leaderboard && Array.isArray(window.leaderboard)) {
+        const parsed = window.leaderboard.map(p => ({
+          name: p.name || "(Anonymouse)",
+          score: Math.floor((p.s - 15) / 10) || 0
+        }));
+        window.onLeaderboardUpdate(parsed);
       }
-    }, 250);
+    }, 1000);
   });
 
-  ws.on("message", (data) => {
-    const buffer = Buffer.from(data);
-    const opcode = buffer[0];
+  console.log("⚡ Headless Browser Connected to Slither Server 8828.");
 
-    // Server sends Carrier Challenge Packet (Opcode 6 / 0x36 / ASCII '6')
-    if (opcode === 54 || opcode === 6) {
-      console.log(" Received security handshake. Resolving challenge...");
-      
-      // Respond with dynamic token bytes to satisfy anti-bot
-      const challengeResponse = Buffer.alloc(27);
-      for (let i = 0; i < 27; i++) challengeResponse[i] = (i * 7) % 256;
-      ws.send(challengeResponse);
-
-      // Now send spawn request
-      sendSpawnPacket(ws, "Server8828Bot");
-    }
-
-    // Opcode 108 ('l') = Leaderboard Packet
-    if (opcode === 108) {
-      latestPlayers = parseLeaderboard(buffer).map(p => ({ name: p.Name, score: p.Score }));
-    }
+  browser.on("disconnected", () => {
+    console.log("Browser disconnected. Restarting browser session in 5s...");
+    setTimeout(startBrowserSession, 5000);
   });
-
-  ws.on("close", (code) => {
-    console.log(`Game connection closed (Code: ${code}). Reconnecting in 5s...`);
-    clearInterval(pingInterval);
-    setTimeout(startGameConnection, 5000);
-  });
-
-  ws.on("error", (err) => {
-    console.error("Game WebSocket error:", err.message);
-  });
-}
-
-function sendSpawnPacket(socket, nick) {
-  const nickBuffer = Buffer.from(nick, "utf8");
-  // [115 ('s'), protocol_ver (10), skin (0), nick_len, ...nick]
-  const packet = Buffer.alloc(4 + nickBuffer.length);
-  packet[0] = 115; // Opcode 's'
-  packet[1] = 10;  // Protocol version
-  packet[2] = 0;   // Skin ID
-  packet[3] = nickBuffer.length;
-  nickBuffer.copy(packet, 4);
-
-  socket.send(packet);
-}
-
-function parseLeaderboard(buffer) {
-  let offset = 1; // Skip opcode byte 108
-  if (buffer.length <= 1) return [];
-
-  const itemCount = buffer[offset++];
-  const leaderboard = [];
-
-  for (let i = 0; i < itemCount; i++) {
-    if (offset + 2 > buffer.length) break;
-
-    const rawScore = (buffer[offset] << 8) | buffer[offset + 1];
-    offset += 2;
-    const mass = Math.max(0, Math.floor((rawScore - 15) / 10));
-
-    if (offset >= buffer.length) break;
-    const nameLen = buffer[offset++];
-
-    if (offset + nameLen > buffer.length) break;
-    const nameBytes = buffer.subarray(offset, offset + nameLen);
-    const name = nameBytes.toString("utf8").trim() || "(Anonymouse)";
-    offset += nameLen;
-
-    leaderboard.push({ Rank: i + 1, Name: name, Score: mass });
-  }
-
-  return leaderboard;
 }
 
 // ──────────────────────────────────────
@@ -265,11 +209,6 @@ client.once("ready", async () => {
   await channel.send("🟢 **JSR GOD MODE ACTIVATED ⚡**").catch(() => {});
   console.log("✅ Startup message sent!");
 
-  setInterval(() => {
-    channel.send("🟢 **BOT ACTIVE (GOD MODE) ⚡**").catch(() => {});
-    console.log("💓 Heartbeat sent");
-  }, 3 * 60 * 60 * 1000);
-
   async function runLoop() {
     const players = latestPlayers;
 
@@ -296,5 +235,5 @@ client.once("ready", async () => {
   setInterval(runLoop, ALERT_INTERVAL);
 });
 
-startGameConnection();
+startBrowserSession();
 client.login(TOKEN);
