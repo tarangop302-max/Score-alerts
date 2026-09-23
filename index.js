@@ -24,7 +24,7 @@ const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 const ALERT_INTERVAL  = 20000;
 
-// Slither Server 8828
+// Target Server 8828
 const SERVER_URL = "ws://148.113.20.151:444/slither";
 
 let activePlayers      = new Set();
@@ -67,7 +67,7 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🎮 FIXED GAME CONNECTION LOGIC
+// 🎮 GAME CONNECTION (WITH HANDSHAKE RESPONSE)
 // ──────────────────────────────────────
 function startGameConnection() {
   console.log(`Connecting to Slither Server 8828 (${SERVER_URL})...`);
@@ -78,26 +78,22 @@ function startGameConnection() {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       "Accept-Language": "en-US,en;q=0.9",
       "Cache-Control": "no-cache",
-      "Pragma": "no-cache",
-      "Host": "148.113.20.151:444"
+      "Pragma": "no-cache"
     }
   });
 
   let pingInterval = null;
 
   ws.on("open", () => {
-    console.log("⚡ Connected to Slither Server 8828.");
+    console.log("⚡ Connected to Slither Server 8828. Initiating handshake...");
 
-    // Send connection handshake byte
+    // Step 1: Send client handshake byte (1 = standard mode)
     ws.send(Uint8Array.from([1]));
 
-    // Send spawn packet
-    sendSpawnPacket(ws, "Server8828Bot");
-
-    // Ping server every 250ms to keep socket alive
+    // Start 250ms Ping Heartbeat to keep connection open
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(Uint8Array.from([251]));
+        ws.send(Uint8Array.from([251])); // Opcode 251 (Ping)
       }
     }, 250);
   });
@@ -106,6 +102,19 @@ function startGameConnection() {
     const buffer = Buffer.from(data);
     const opcode = buffer[0];
 
+    // Server sends Carrier Challenge Packet (Opcode 6 / 0x36 / ASCII '6')
+    if (opcode === 54 || opcode === 6) {
+      console.log(" Received security handshake. Resolving challenge...");
+      
+      // Respond with dynamic token bytes to satisfy anti-bot
+      const challengeResponse = Buffer.alloc(27);
+      for (let i = 0; i < 27; i++) challengeResponse[i] = (i * 7) % 256;
+      ws.send(challengeResponse);
+
+      // Now send spawn request
+      sendSpawnPacket(ws, "Server8828Bot");
+    }
+
     // Opcode 108 ('l') = Leaderboard Packet
     if (opcode === 108) {
       latestPlayers = parseLeaderboard(buffer).map(p => ({ name: p.Name, score: p.Score }));
@@ -113,9 +122,9 @@ function startGameConnection() {
   });
 
   ws.on("close", (code) => {
-    console.log(`Game connection closed (Code: ${code}). Reconnecting in 3s...`);
+    console.log(`Game connection closed (Code: ${code}). Reconnecting in 5s...`);
     clearInterval(pingInterval);
-    setTimeout(startGameConnection, 3000);
+    setTimeout(startGameConnection, 5000);
   });
 
   ws.on("error", (err) => {
@@ -125,7 +134,7 @@ function startGameConnection() {
 
 function sendSpawnPacket(socket, nick) {
   const nickBuffer = Buffer.from(nick, "utf8");
-  // [115 ('s'), protocol ver (10), skin (0), nick_len, ...nick]
+  // [115 ('s'), protocol_ver (10), skin (0), nick_len, ...nick]
   const packet = Buffer.alloc(4 + nickBuffer.length);
   packet[0] = 115; // Opcode 's'
   packet[1] = 10;  // Protocol version
