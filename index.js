@@ -64,7 +64,7 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 WEBSOCKET PACKET INTERCEPTOR
+// 🌐 BROWSER ENGINE INTERCEPTOR
 // ──────────────────────────────────────
 async function startBrowserSession() {
   console.log("🚀 Launching Headless Browser Interceptor...");
@@ -85,88 +85,17 @@ async function startBrowserSession() {
     const page = await browser.newPage();
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
-    // Expose Node bridge function to pass page state back
+    // Expose Node bridge function to update page state
     await page.exposeFunction("onLeaderboardUpdate", (players) => {
-      if (players && players.length > 0) {
+      if (Array.isArray(players) && players.length > 0) {
         latestPlayers = players;
       }
     });
 
-    // Tap into WebSocket construction BEFORE slither.io scripts initialize
-    await page.evaluateOnNewDocument(() => {
-      function parseLeaderboardPacket(u) {
-        if (u[0] !== 108 || u.length < 5) return null;
-
-        for (let startOffset of [1, 2, 3, 4]) {
-          let curr = startOffset;
-          let count = u[curr++];
-          if (count < 1 || count > 20) continue;
-
-          let players = [];
-          let valid = true;
-
-          for (let i = 0; i < count; i++) {
-            if (curr + 3 > u.length) { valid = false; break; }
-
-            let rawScore = (u[curr] << 8) | u[curr + 1];
-            curr += 2;
-
-            let nameLen = u[curr++];
-            if (curr + nameLen > u.length) { valid = false; break; }
-
-            let nameBytes = u.subarray(curr, curr + nameLen);
-            curr += nameLen;
-
-            let name = "";
-            try {
-              name = new TextDecoder("utf-8").decode(nameBytes);
-            } catch(e) {
-              for (let b of nameBytes) name += String.fromCharCode(b);
-            }
-            name = name.trim() || "(Anonymouse)";
-
-            let score = Math.max(0, Math.floor((rawScore - 15) / 10));
-            if (score <= 0 && rawScore > 0) score = rawScore;
-
-            players.push({ name, score });
-          }
-
-          if (valid && players.length > 0) {
-            return players;
-          }
-        }
-        return null;
-      }
-
-      const OriginalWebSocket = window.WebSocket;
-
-      window.WebSocket = function (url, protocols) {
-        const ws = new OriginalWebSocket(url, protocols);
-
-        ws.addEventListener("message", (event) => {
-          if (!(event.data instanceof ArrayBuffer)) return;
-          const u = new Uint8Array(event.data);
-          if (u.length < 3) return;
-
-          // Opcode 108 ('l') = Leaderboard Packet
-          if (u[0] === 108) {
-            const players = parseLeaderboardPacket(u);
-            if (players && players.length > 0 && window.onLeaderboardUpdate) {
-              window.onLeaderboardUpdate(players);
-            }
-          }
-        });
-
-        return ws;
-      };
-
-      window.WebSocket.prototype = OriginalWebSocket.prototype;
-    });
-
-    // Navigate to actual slither.io origin so headers & cookies remain valid
+    // Navigate to slither origin
     await page.goto("https://slither.io", { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // Force Server 8828 & trigger play loop in page environment
+    // Inject engine hook & trigger play on target server
     await page.evaluate(() => {
       window.bServerIp = "148.113.20.151";
       window.bServerPort = 444;
@@ -182,9 +111,39 @@ async function startBrowserSession() {
 
       forceJoin();
       setInterval(forceJoin, 5000);
+
+      // Extract exact scores from Slither's native global engine state
+      setInterval(() => {
+        const nativeMembers = window.members || window.lb_p || window.leaderboard;
+        if (Array.isArray(nativeMembers) && nativeMembers.length > 0) {
+          const parsed = nativeMembers.map(m => {
+            let name = m.nk || m.nick || m.name || m.n || "(Anonymouse)";
+            let score = 0;
+
+            // Use exact computed mass if available
+            if (typeof m.s === "number" && m.s > 0) {
+              score = m.s;
+            } else if (typeof m.score === "number" && m.score > 0) {
+              score = m.score;
+            } else if (m.sct && window.fpsls && window.fmlts) {
+              // Slither exact score lookup formula
+              score = Math.floor(15 * (window.fpsls[m.sct] + (m.fam || 0) / window.fmlts[m.sct] - 1) - 5);
+            }
+
+            return {
+              name: String(name).trim() || "(Anonymouse)",
+              score: Math.max(0, Math.floor(score))
+            };
+          });
+
+          if (parsed.length > 0 && window.onLeaderboardUpdate) {
+            window.onLeaderboardUpdate(parsed);
+          }
+        }
+      }, 1000);
     });
 
-    console.log("⚡ Network Interceptor active on Server 8828 (https://slither.io).");
+    console.log("⚡ Engine Interceptor active on Server 8828 (https://slither.io).");
 
     browser.on("disconnected", () => {
       console.log("Browser disconnected. Restarting in 5s...");
