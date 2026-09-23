@@ -64,7 +64,7 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 WEBSOCKET INTERCEPTOR (SERVER 8828 PACKET DECODER)
+// 🌐 HEADLESS BROWSER SLITHER CLIENT
 // ──────────────────────────────────────
 async function startBrowserSession() {
   console.log("🚀 Launching Headless Browser Interceptor...");
@@ -85,91 +85,146 @@ async function startBrowserSession() {
     const page = await browser.newPage();
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
-    // Node bridge callback to update global leaderboard state
+    // Forward browser logs to Node console for full visibility
+    page.on("console", msg => console.log("🌐 BROWSER:", msg.text()));
+    page.on("pageerror", err => console.log("🌐 BROWSER ERROR:", err.message));
+
+    // Expose Node bridge function
     await page.exposeFunction("onLeaderboardUpdate", (players) => {
       if (players && players.length > 0) {
         latestPlayers = players;
       }
     });
 
-    // Intercept WebSocket creation before the page scripts load
-    await page.evaluateOnNewDocument(() => {
-      const OriginalWebSocket = window.WebSocket;
+    // Directly load self-contained Slither Client HTML into browser memory
+    const clientHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head><title>Slither Client</title></head>
+      <body>
+      <script>
+        console.log("Initializing Direct WebSocket Client to Server 8828...");
 
-      window.WebSocket = function (url, protocols) {
-        // Force server 8828 IP
-        const targetUrl = "ws://148.113.20.151:444/slither";
-        const ws = new OriginalWebSocket(targetUrl, protocols);
+        function parseLeaderboard(u) {
+          if (u[0] !== 108 || u.length < 5) return null;
 
-        ws.binaryType = "arraybuffer";
+          const candidates = [1, 2, 3];
+          for (let startOffset of candidates) {
+            let curr = startOffset;
+            let count = u[curr++];
+            if (count < 1 || count > 20) continue;
 
-        ws.addEventListener("message", (event) => {
-          if (!(event.data instanceof ArrayBuffer)) return;
-          const u = new Uint8Array(event.data);
-          if (u.length < 3) return;
+            let players = [];
+            let valid = true;
 
-          const opcode = u[0];
+            for (let i = 0; i < count; i++) {
+              if (curr + 3 > u.length) { valid = false; break; }
 
-          // Opcode 108 ('l') = Leaderboard Packet
-          if (opcode === 108) {
-            const players = [];
-            let curr = 1;
-            const itemCount = u[curr++];
-
-            while (curr < u.length - 2) {
-              if (curr + 2 > u.length) break;
-              const rawScore = (u[curr] << 8) | u[curr + 1];
+              let rawScore = (u[curr] << 8) | u[curr + 1];
               curr += 2;
 
-              if (curr >= u.length) break;
-              const nameLen = u[curr++];
+              let nameLen = u[curr++];
+              if (curr + nameLen > u.length) { valid = false; break; }
 
-              if (curr + nameLen > u.length) break;
-              const nameBytes = u.subarray(curr, curr + nameLen);
+              let nameBytes = u.subarray(curr, curr + nameLen);
               curr += nameLen;
 
               let name = "";
-              for (let i = 0; i < nameBytes.length; i++) {
-                name += String.fromCharCode(nameBytes[i]);
+              try {
+                name = new TextDecoder("utf-8").decode(nameBytes);
+              } catch(e) {
+                for (let b of nameBytes) name += String.fromCharCode(b);
               }
-              try { name = decodeURIComponent(escape(name)); } catch(e) {}
               name = name.trim() || "(Anonymouse)";
 
-              const score = Math.max(0, Math.floor((rawScore - 15) / 10));
+              let score = Math.max(0, Math.floor((rawScore - 15) / 10));
+              if (score <= 0 && rawScore > 0) score = rawScore;
+
               players.push({ name, score });
             }
 
-            if (players.length > 0 && window.onLeaderboardUpdate) {
-              window.onLeaderboardUpdate(players);
+            if (valid && players.length > 0) {
+              return players;
             }
           }
-        });
-
-        return ws;
-      };
-
-      window.WebSocket.prototype = OriginalWebSocket.prototype;
-    });
-
-    // Navigate to slither.io
-    await page.goto("http://slither.io", { waitUntil: "domcontentloaded", timeout: 60000 });
-
-    // Auto-spawn loop to maintain continuous server packet feed
-    await page.evaluate(() => {
-      setInterval(() => {
-        if (typeof window.play_slither === "function") {
-          window.play_slither();
-        } else {
-          const btn = document.querySelector("#playh .nsi") || document.getElementById("playbtn");
-          if (btn) btn.click();
+          return null;
         }
-      }, 4000);
-    });
 
-    console.log("⚡ Network Interceptor active on Server 8828.");
+        function connectWS() {
+          const wsUrl = "ws://148.113.20.151:444/slither";
+          console.log("Connecting WebSocket to " + wsUrl);
+
+          const ws = new WebSocket(wsUrl);
+          ws.binaryType = "arraybuffer";
+
+          let pingInterval = null;
+          let spawnInterval = null;
+
+          ws.onopen = () => {
+            console.log("✅ WebSocket connected to Slither Server 8828!");
+
+            // Protocol initialization packet
+            ws.send(new Uint8Array([1]));
+
+            // Ping keepalive every 250ms
+            pingInterval = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(new Uint8Array([251]));
+              }
+            }, 250);
+
+            // Auto-spawn packet ("s", protocol 10, skin 0, name "JSR-Bot")
+            const spawnPacket = new Uint8Array([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
+            ws.send(spawnPacket);
+
+            spawnInterval = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(spawnPacket);
+              }
+            }, 4000);
+          };
+
+          ws.onmessage = (event) => {
+            if (!(event.data instanceof ArrayBuffer)) return;
+            const u = new Uint8Array(event.data);
+            if (u.length < 3) return;
+
+            const opcode = u[0];
+
+            // Opcode 108 ('l') = Leaderboard Packet
+            if (opcode === 108) {
+              const players = parseLeaderboard(u);
+              if (players && players.length > 0) {
+                if (window.onLeaderboardUpdate) {
+                  window.onLeaderboardUpdate(players);
+                }
+              }
+            }
+          };
+
+          ws.onerror = (err) => {
+            console.error("WS Error:", err);
+          };
+
+          ws.onclose = (e) => {
+            console.log("WS Closed with code " + e.code + ". Reconnecting in 3s...");
+            clearInterval(pingInterval);
+            clearInterval(spawnInterval);
+            setTimeout(connectWS, 3000);
+          };
+        }
+
+        connectWS();
+      </script>
+      </body>
+      </html>
+    `;
+
+    await page.setContent(clientHTML);
+    console.log("⚡ Internal Slither Client injected & running.");
 
     browser.on("disconnected", () => {
-      console.log("Browser disconnected. Restarting in 5s...");
+      console.log("Browser session disconnected. Restarting in 5s...");
       setTimeout(startBrowserSession, 5000);
     });
   } catch (err) {
@@ -260,7 +315,8 @@ async function processAlerts(players, channel) {
 // ──────────────────────────────────────
 // 🚀 BOT READY
 // ──────────────────────────────────────
-client.once("ready", async () => {
+const readyEvent = client.once ? "clientReady" : "ready";
+client.once(readyEvent, async () => {
   console.log(`✅ Discord bot ready: ${client.user.tag}`);
 
   const channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID:", e.message); return null; });
