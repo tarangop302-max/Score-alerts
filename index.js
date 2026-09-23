@@ -64,7 +64,7 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 HEADLESS SLITHER INTERCEPTOR (AUTO-SPAWN FIX)
+// 🌐 WEBSOCKET INTERCEPTOR (SERVER 8828 PACKET DECODER)
 // ──────────────────────────────────────
 async function startBrowserSession() {
   console.log("🚀 Launching Headless Browser Interceptor...");
@@ -85,60 +85,91 @@ async function startBrowserSession() {
     const page = await browser.newPage();
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
-    // Expose Node bridge function to pass page state back to index.js
+    // Node bridge callback to update global leaderboard state
     await page.exposeFunction("onLeaderboardUpdate", (players) => {
       if (players && players.length > 0) {
         latestPlayers = players;
       }
     });
 
-    // Open Slither.io client
+    // Intercept WebSocket creation before the page scripts load
+    await page.evaluateOnNewDocument(() => {
+      const OriginalWebSocket = window.WebSocket;
+
+      window.WebSocket = function (url, protocols) {
+        // Force server 8828 IP
+        const targetUrl = "ws://148.113.20.151:444/slither";
+        const ws = new OriginalWebSocket(targetUrl, protocols);
+
+        ws.binaryType = "arraybuffer";
+
+        ws.addEventListener("message", (event) => {
+          if (!(event.data instanceof ArrayBuffer)) return;
+          const u = new Uint8Array(event.data);
+          if (u.length < 3) return;
+
+          const opcode = u[0];
+
+          // Opcode 108 ('l') = Leaderboard Packet
+          if (opcode === 108) {
+            const players = [];
+            let curr = 1;
+            const itemCount = u[curr++];
+
+            while (curr < u.length - 2) {
+              if (curr + 2 > u.length) break;
+              const rawScore = (u[curr] << 8) | u[curr + 1];
+              curr += 2;
+
+              if (curr >= u.length) break;
+              const nameLen = u[curr++];
+
+              if (curr + nameLen > u.length) break;
+              const nameBytes = u.subarray(curr, curr + nameLen);
+              curr += nameLen;
+
+              let name = "";
+              for (let i = 0; i < nameBytes.length; i++) {
+                name += String.fromCharCode(nameBytes[i]);
+              }
+              try { name = decodeURIComponent(escape(name)); } catch(e) {}
+              name = name.trim() || "(Anonymouse)";
+
+              const score = Math.max(0, Math.floor((rawScore - 15) / 10));
+              players.push({ name, score });
+            }
+
+            if (players.length > 0 && window.onLeaderboardUpdate) {
+              window.onLeaderboardUpdate(players);
+            }
+          }
+        });
+
+        return ws;
+      };
+
+      window.WebSocket.prototype = OriginalWebSocket.prototype;
+    });
+
+    // Navigate to slither.io
     await page.goto("http://slither.io", { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // Target Server 8828 & Auto-play to initialize WebSocket data stream
+    // Auto-spawn loop to maintain continuous server packet feed
     await page.evaluate(() => {
-      window.bServerIp = "148.113.20.151";
-      window.bServerPort = 444;
-
-      // Trigger Slither internal spawn call
-      function forceJoin() {
+      setInterval(() => {
         if (typeof window.play_slither === "function") {
           window.play_slither();
         } else {
           const btn = document.querySelector("#playh .nsi") || document.getElementById("playbtn");
           if (btn) btn.click();
         }
-      }
-
-      forceJoin();
-
-      // Read internal leaderboard variables periodically
-      setInterval(() => {
-        // Fallback checks across Slither global memory properties
-        const rawBoard = window.leaderboard || window.lb_p || window.top_snakes || [];
-
-        if (Array.isArray(rawBoard) && rawBoard.length > 0) {
-          const parsed = rawBoard.map(p => {
-            const rawName = p.nick || p.name || p.nk || "(Anonymouse)";
-            const rawLen = p.s || p.score || p.len || 15;
-            return {
-              name: String(rawName).trim(),
-              score: Math.max(0, Math.floor((rawLen - 15) / 10))
-            };
-          });
-
-          window.onLeaderboardUpdate(parsed);
-        } else {
-          // Re-attempt join if player died or got bumped to main menu
-          forceJoin();
-        }
-      }, 1000);
+      }, 4000);
     });
 
-    console.log("⚡ Headless Browser Connected & Active on Server 8828.");
+    console.log("⚡ Network Interceptor active on Server 8828.");
 
     browser.on("disconnected", () => {
-      console.log("Browser session lost. Restarting in 5s...");
+      console.log("Browser disconnected. Restarting in 5s...");
       setTimeout(startBrowserSession, 5000);
     });
   } catch (err) {
