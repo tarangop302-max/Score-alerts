@@ -14,7 +14,7 @@ http.createServer((req, res) => {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // ─────────────────────────────────────
-// 🔑 CONFIG — paste your values here
+// 🔑 CONFIG
 // ─────────────────────────────────────
 const T1              = "MTQ4OTI0NDExMTM2MDc1NzgzMQ.Gat3qj.8A6d";
 const T2              = "Ga4uurKHZv32mlC5eTToeFCO-3J-OQC6AA";
@@ -24,7 +24,7 @@ const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
 const ALERT_INTERVAL  = 20000;
 
-// 🎮 Live game connection — Slither Server 8828 (replaces the old JSONBin polling)
+// Slither Server 8828
 const SERVER_URL = "ws://148.113.20.151:444/slither";
 
 let activePlayers      = new Set();
@@ -33,7 +33,7 @@ const alerted80        = new Set();
 const jsr20            = new Set();
 const jsr50            = new Set();
 let leaderboardMessage = null;
-let latestPlayers      = []; // live leaderboard snapshot, kept updated by the WS connection
+let latestPlayers      = [];
 
 // ──────────────────────────────────────
 // 🏷️ TEAM DETECTION
@@ -67,7 +67,7 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🎮 LIVE GAME CONNECTION (replaces JSONBin polling)
+// 🎮 FIXED GAME CONNECTION LOGIC
 // ──────────────────────────────────────
 function startGameConnection() {
   console.log(`Connecting to Slither Server 8828 (${SERVER_URL})...`);
@@ -75,8 +75,11 @@ function startGameConnection() {
   const ws = new WebSocket(SERVER_URL, {
     headers: {
       "Origin": "http://slither.io",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       "Accept-Language": "en-US,en;q=0.9",
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache",
+      "Host": "148.113.20.151:444"
     }
   });
 
@@ -84,16 +87,26 @@ function startGameConnection() {
 
   ws.on("open", () => {
     console.log("⚡ Connected to Slither Server 8828.");
-    ws.send(Buffer.from([0x01]));
+
+    // Send connection handshake byte
+    ws.send(Uint8Array.from([1]));
+
+    // Send spawn packet
     sendSpawnPacket(ws, "Server8828Bot");
+
+    // Ping server every 250ms to keep socket alive
     pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(Buffer.from([251]));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(Uint8Array.from([251]));
+      }
     }, 250);
   });
 
   ws.on("message", (data) => {
     const buffer = Buffer.from(data);
     const opcode = buffer[0];
+
+    // Opcode 108 ('l') = Leaderboard Packet
     if (opcode === 108) {
       latestPlayers = parseLeaderboard(buffer).map(p => ({ name: p.Name, score: p.Score }));
     }
@@ -112,28 +125,35 @@ function startGameConnection() {
 
 function sendSpawnPacket(socket, nick) {
   const nickBuffer = Buffer.from(nick, "utf8");
+  // [115 ('s'), protocol ver (10), skin (0), nick_len, ...nick]
   const packet = Buffer.alloc(4 + nickBuffer.length);
   packet[0] = 115; // Opcode 's'
   packet[1] = 10;  // Protocol version
   packet[2] = 0;   // Skin ID
   packet[3] = nickBuffer.length;
   nickBuffer.copy(packet, 4);
+
   socket.send(packet);
 }
 
 function parseLeaderboard(buffer) {
   let offset = 1; // Skip opcode byte 108
+  if (buffer.length <= 1) return [];
+
   const itemCount = buffer[offset++];
   const leaderboard = [];
 
   for (let i = 0; i < itemCount; i++) {
-    if (offset >= buffer.length) break;
+    if (offset + 2 > buffer.length) break;
 
     const rawScore = (buffer[offset] << 8) | buffer[offset + 1];
     offset += 2;
     const mass = Math.max(0, Math.floor((rawScore - 15) / 10));
 
+    if (offset >= buffer.length) break;
     const nameLen = buffer[offset++];
+
+    if (offset + nameLen > buffer.length) break;
     const nameBytes = buffer.subarray(offset, offset + nameLen);
     const name = nameBytes.toString("utf8").trim() || "(Anonymouse)";
     offset += nameLen;
