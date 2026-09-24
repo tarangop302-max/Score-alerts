@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const puppeteer = require("puppeteer");
+const WebSocket = require("ws");
 const http = require("http");
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
@@ -64,171 +64,137 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 WEBSOCKET & ENGINE INTERCEPTOR
+// 📡 DIRECT SLITHER WEBSOCKET CLIENT
 // ──────────────────────────────────────
-async function startBrowserSession() {
-  console.log("🚀 Launching Headless Browser Interceptor...");
+let slitherWS = null;
+
+function parseSlitherLeaderboard(buf) {
+  const u = new Uint8Array(buf);
+  if (u[0] !== 108 || u.length < 8) return null;
+
+  let bestPlayers = [];
+
+  // Multi-offset scanner for packet 108 ('l')
+  for (let headerOffset of [3, 4, 5, 6, 7, 2, 1, 8]) {
+    for (let prefixLen of [2, 5, 3, 4]) {
+      let curr = headerOffset;
+      let players = [];
+      let valid = true;
+
+      while (curr < u.length) {
+        if (curr + prefixLen + 1 > u.length) { valid = false; break; }
+
+        let rawScore = (u[curr] << 8) | u[curr + 1];
+
+        let nameLenPos = curr + prefixLen;
+        if (nameLenPos >= u.length) { valid = false; break; }
+
+        let nameLen = u[nameLenPos];
+        if (nameLen > 35) { valid = false; break; }
+
+        let nameStart = nameLenPos + 1;
+        if (nameStart + nameLen > u.length) { valid = false; break; }
+
+        let nameBytes = u.subarray(nameStart, nameStart + nameLen);
+        curr = nameStart + nameLen;
+
+        let name = "";
+        try {
+          name = new TextDecoder("utf-8").decode(nameBytes);
+        } catch (e) {
+          for (let b of nameBytes) name += String.fromCharCode(b);
+        }
+        name = name.trim() || "(Anonymouse)";
+
+        // Convert length units to in-game score
+        let score = rawScore;
+        if (rawScore > 15) {
+          score = Math.floor((rawScore - 15) / 10);
+        }
+
+        players.push({ name, score });
+      }
+
+      if (valid && players.length >= 3 && players.length <= 12) {
+        if (players.length > bestPlayers.length) {
+          bestPlayers = players;
+        }
+      }
+    }
+  }
+
+  return bestPlayers.length > 0 ? bestPlayers : null;
+}
+
+function startSlitherSession() {
+  console.log("⚡ Connecting Direct WebSocket to Slither Server 8828 (148.113.20.151:444)...");
 
   try {
-    const browser = await puppeteer.launch({
-      headless: "new",
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--disable-gpu",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding"
-      ]
-    });
-
-    const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
-
-    // Expose Node bridge function to update page state
-    await page.exposeFunction("onLeaderboardUpdate", (players) => {
-      if (Array.isArray(players) && players.length > 0) {
-        latestPlayers = players;
+    slitherWS = new WebSocket("ws://148.113.20.151:444/slither", {
+      headers: {
+        "Origin": "https://slither.io",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
       }
     });
 
-    // Un-throttle headless execution & hook WebSocket before page load
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(document, "hidden", { value: false, writable: false });
-      Object.defineProperty(document, "visibilityState", { value: "visible", writable: false });
-      window.requestAnimationFrame = (cb) => setTimeout(cb, 1000 / 60);
+    let pingInterval = null;
+    let spawnInterval = null;
 
-      function parseBinaryLeaderboard(u) {
-        if (u[0] !== 108 || u.length < 8) return null;
+    slitherWS.on("open", () => {
+      console.log("✅ Direct WebSocket connected to Slither Server 8828!");
 
-        for (let startOffset of [3, 4, 5, 6, 7, 2, 1]) {
-          let p = startOffset;
-          let players = [];
-          let valid = true;
+      // Handshake packet
+      slitherWS.send(Buffer.from([1]));
 
-          while (p < u.length) {
-            if (p + 3 > u.length) { valid = false; break; }
-
-            let rawVal = (u[p] << 8) | u[p + 1];
-            p += 2;
-
-            let nameLen = u[p++];
-            if (nameLen > 30 && p < u.length) {
-              p++;
-              nameLen = u[p - 1];
-            }
-
-            if (nameLen < 0 || nameLen > 35 || p + nameLen > u.length) {
-              valid = false;
-              break;
-            }
-
-            let nameBytes = u.subarray(p, p + nameLen);
-            p += nameLen;
-
-            let name = "";
-            try {
-              name = new TextDecoder("utf-8").decode(nameBytes);
-            } catch(e) {
-              for (let i = 0; i < nameBytes.length; i++) name += String.fromCharCode(nameBytes[i]);
-            }
-            name = name.trim() || "(Anonymouse)";
-
-            // Convert raw binary mass integer into exact score formula
-            let score = rawVal;
-            if (rawVal > 0) {
-              score = Math.floor(15 * (rawVal - 1) / 10);
-              if (score <= 0) score = rawVal;
-            }
-
-            players.push({ name, score });
-          }
-
-          if (valid && players.length >= 3 && players.length <= 10) {
-            return players;
-          }
+      // Ping keepalive every 250ms
+      pingInterval = setInterval(() => {
+        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
+          slitherWS.send(Buffer.from([251]));
         }
-        return null;
-      }
+      }, 250);
 
-      const OriginalWebSocket = window.WebSocket;
-      window.WebSocket = function (url, protocols) {
-        const ws = new OriginalWebSocket(url, protocols);
+      // Auto-spawn packet ("s", protocol 10, skin 0, name "JSR-Bot")
+      const spawnPacket = Buffer.from([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
+      slitherWS.send(spawnPacket);
 
-        ws.addEventListener("message", (evt) => {
-          if (evt.data instanceof ArrayBuffer) {
-            const u = new Uint8Array(evt.data);
-            if (u[0] === 108) {
-              const res = parseBinaryLeaderboard(u);
-              if (res && res.length > 0 && window.onLeaderboardUpdate) {
-                window.onLeaderboardUpdate(res);
-              }
-            }
-          }
-        });
-
-        return ws;
-      };
-      window.WebSocket.prototype = OriginalWebSocket.prototype;
+      spawnInterval = setInterval(() => {
+        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
+          slitherWS.send(spawnPacket);
+        }
+      }, 4000);
     });
 
-    // Navigate to slither origin
-    await page.goto("https://slither.io", { waitUntil: "domcontentloaded", timeout: 60000 });
+    slitherWS.on("message", (data) => {
+      if (!data) return;
+      const u = new Uint8Array(data);
+      if (u.length < 3) return;
 
-    // Inject server force join + secondary runtime check
-    await page.evaluate(() => {
-      window.bServerIp = "148.113.20.151";
-      window.bServerPort = 444;
-
-      function forceJoin() {
-        if (typeof window.play_slither === "function") {
-          window.play_slither();
-        } else {
-          const btn = document.querySelector("#playh .nsi") || document.getElementById("playbtn");
-          if (btn) btn.click();
+      // Opcode 108 ('l') = Leaderboard Packet
+      if (u[0] === 108) {
+        const players = parseSlitherLeaderboard(u);
+        if (players && players.length > 0) {
+          latestPlayers = players;
         }
       }
-
-      forceJoin();
-      setInterval(forceJoin, 5000);
-
-      // Fallback engine inspect
-      setInterval(() => {
-        const nativeMembers = window.members || window.lb_p || window.leaderboard;
-        if (Array.isArray(nativeMembers) && nativeMembers.length > 0) {
-          const parsed = nativeMembers.map(m => {
-            let name = m.nk || m.nick || m.name || m.n || "(Anonymouse)";
-            let score = 0;
-            if (typeof m.s === "number" && m.s > 0) score = m.s;
-            else if (typeof m.score === "number" && m.score > 0) score = m.score;
-            else if (m.sct && window.fpsls && window.fmlts) {
-              score = Math.floor(15 * (window.fpsls[m.sct] + (m.fam || 0) / window.fmlts[m.sct] - 1) - 5);
-            }
-            return {
-              name: String(name).trim() || "(Anonymouse)",
-              score: Math.max(0, Math.floor(score))
-            };
-          });
-
-          if (parsed.length > 0 && window.onLeaderboardUpdate) {
-            window.onLeaderboardUpdate(parsed);
-          }
-        }
-      }, 1000);
     });
 
-    console.log("⚡ Network & Engine Interceptor active on Server 8828 (https://slither.io).");
-
-    browser.on("disconnected", () => {
-      console.log("Browser disconnected. Restarting in 5s...");
-      setTimeout(startBrowserSession, 5000);
+    slitherWS.on("error", (err) => {
+      console.log("⚠️ Slither WS Error:", err.message);
     });
+
+    slitherWS.on("close", (code) => {
+      console.log(`🔌 Slither WS closed (code ${code}). Reconnecting in 3s...`);
+      clearInterval(pingInterval);
+      clearInterval(spawnInterval);
+      setTimeout(startSlitherSession, 3000);
+    });
+
   } catch (err) {
-    console.error("Browser launch error:", err.message);
-    setTimeout(startBrowserSession, 5000);
+    console.error("❌ WS Launch error:", err.message);
+    setTimeout(startSlitherSession, 3000);
   }
 }
 
@@ -342,7 +308,7 @@ client.once("clientReady", async () => {
 
     try {
       const embed = buildLeaderboardEmbed(players);
-      if (leaderboardMessage) {
+      if {
         await leaderboardMessage.edit({ embeds: [embed] });
       } else {
         leaderboardMessage = await kingChannel.send({ embeds: [embed] });
@@ -360,5 +326,5 @@ client.once("clientReady", async () => {
   setInterval(runLoop, ALERT_INTERVAL);
 });
 
-startBrowserSession();
+startSlitherSession();
 client.login(TOKEN);
