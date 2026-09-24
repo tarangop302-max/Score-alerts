@@ -139,36 +139,35 @@ function startSlitherSession() {
     });
 
     let pingInterval = null;
-    let handshakeDone = false;
 
+    // ── KEY FIX ────────────────────────────────────────────────
+    // The old code waited for an incoming "message" before sending
+    // the protocol/spawn packets. If the server never speaks first,
+    // that handshake never fires, the bot sends nothing, and the
+    // server drops the idle socket (abnormal close, code 1006)
+    // after a short timeout. Send the handshake immediately on open.
     slitherWS.on("open", () => {
       console.log("✅ Direct WebSocket connected to Server 8828!");
-      handshakeDone = false;
+
+      // Send Protocol 10 Initialization
+      slitherWS.send(Buffer.from([10]));
+
+      // Send Spawn Packet ("s", protocol 10, skin 0, name "JSR-Bot")
+      const spawnPacket = Buffer.from([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
+      slitherWS.send(spawnPacket);
+
+      // Ping keepalive every 1000ms to prevent rate-limit drop
+      pingInterval = setInterval(() => {
+        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
+          slitherWS.send(Buffer.from([251]));
+        }
+      }, 1000);
     });
 
     slitherWS.on("message", (data) => {
       if (!data) return;
       const u = new Uint8Array(data);
       if (u.length < 2) return;
-
-      // Handle server setup packet before sending client protocol
-      if (!handshakeDone) {
-        handshakeDone = true;
-
-        // Send Protocol 10 Initialization
-        slitherWS.send(Buffer.from([10]));
-
-        // Send Spawn Packet ("s", protocol 10, skin 0, name "JSR-Bot")
-        const spawnPacket = Buffer.from([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
-        slitherWS.send(spawnPacket);
-
-        // Ping keepalive every 1000ms (1 second) to prevent rate-limit drop
-        pingInterval = setInterval(() => {
-          if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
-            slitherWS.send(Buffer.from([251]));
-          }
-        }, 1000);
-      }
 
       // Opcode 108 ('l') = Leaderboard Packet
       if (u[0] === 108) {
