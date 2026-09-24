@@ -5,7 +5,7 @@ const http = require("http");
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("JSR BOT IS ALIVE ✅");
@@ -64,7 +64,7 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 📡 DIRECT SLITHER WEBSOCKET ENGINE
+// 📡 FIXED SLITHER WEBSOCKET CLIENT
 // ──────────────────────────────────────
 let slitherWS = null;
 
@@ -74,7 +74,6 @@ function parseBinaryLeaderboard(buf) {
 
   let bestPlayers = [];
 
-  // Binary scanner for Slither packet 108 ('l')
   for (let headerOffset of [3, 4, 5, 6, 7, 2, 1, 8]) {
     for (let prefixLen of [2, 5, 3, 4]) {
       let curr = headerOffset;
@@ -107,9 +106,8 @@ function parseBinaryLeaderboard(buf) {
         name = name.trim() || "(Anonymouse)";
 
         let score = rawScore;
-        if (rawScore > 0) {
-          score = Math.floor(15 * (rawScore - 1) / 10);
-          if (score <= 0) score = rawScore;
+        if (rawScore > 15) {
+          score = Math.floor((rawScore - 15) / 10);
         }
 
         players.push({ name, score });
@@ -133,41 +131,44 @@ function startSlitherSession() {
     slitherWS = new WebSocket("ws://148.113.20.151:444/slither", {
       headers: {
         "Origin": "https://slither.io",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
       }
     });
 
     let pingInterval = null;
-    let spawnInterval = null;
+    let handshakeDone = false;
 
     slitherWS.on("open", () => {
       console.log("✅ Direct WebSocket connected to Server 8828!");
-
-      // Protocol handshake
-      slitherWS.send(Buffer.from([1]));
-
-      // Ping frame every 250ms
-      pingInterval = setInterval(() => {
-        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
-          slitherWS.send(Buffer.from([251]));
-        }
-      }, 250);
-
-      // Spawn packet ('s', protocol 10, skin 0, name "JSR-Bot")
-      const spawnPacket = Buffer.from([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
-      slitherWS.send(spawnPacket);
-
-      spawnInterval = setInterval(() => {
-        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
-          slitherWS.send(spawnPacket);
-        }
-      }, 4000);
+      handshakeDone = false;
     });
 
     slitherWS.on("message", (data) => {
       if (!data) return;
       const u = new Uint8Array(data);
-      if (u.length < 3) return;
+      if (u.length < 2) return;
+
+      // Handle server setup packet before sending client protocol
+      if (!handshakeDone) {
+        handshakeDone = true;
+
+        // Send Protocol 10 Initialization
+        slitherWS.send(Buffer.from([10]));
+
+        // Send Spawn Packet ("s", protocol 10, skin 0, name "JSR-Bot")
+        const spawnPacket = Buffer.from([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
+        slitherWS.send(spawnPacket);
+
+        // Ping keepalive every 1000ms (1 second) to prevent rate-limit drop
+        pingInterval = setInterval(() => {
+          if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
+            slitherWS.send(Buffer.from([251]));
+          }
+        }, 1000);
+      }
 
       // Opcode 108 ('l') = Leaderboard Packet
       if (u[0] === 108) {
@@ -183,15 +184,14 @@ function startSlitherSession() {
     });
 
     slitherWS.on("close", (code) => {
-      console.log(`🔌 Slither WS closed (code ${code}). Reconnecting in 3s...`);
-      clearInterval(pingInterval);
-      clearInterval(spawnInterval);
-      setTimeout(startSlitherSession, 3000);
+      console.log(`🔌 Slither WS closed (code ${code}). Reconnecting in 5s...`);
+      if (pingInterval) clearInterval(pingInterval);
+      setTimeout(startSlitherSession, 5000);
     });
 
   } catch (err) {
     console.error("❌ WS Launch error:", err.message);
-    setTimeout(startSlitherSession, 3000);
+    setTimeout(startSlitherSession, 5000);
   }
 }
 
