@@ -1,7 +1,6 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const puppeteer = require("puppeteer");
+const WebSocket = require("ws");
 const http = require("http");
-const fs = require("fs"); // Added to check local file paths
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
@@ -65,149 +64,134 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🔍 AUTOMATIC CHROMIUM PATH FINDER
+// 📡 DIRECT SLITHER WEBSOCKET ENGINE
 // ──────────────────────────────────────
-function findChromiumExecutable() {
-  const possiblePaths = [
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome"
-  ];
-  for (const path of possiblePaths) {
-    if (fs.existsSync(path)) {
-      console.log(`✅ Found system Chromium at: ${path}`);
-      return path;
+let slitherWS = null;
+
+function parseBinaryLeaderboard(buf) {
+  const u = new Uint8Array(buf);
+  if (u[0] !== 108 || u.length < 8) return null;
+
+  let bestPlayers = [];
+
+  // Binary scanner for Slither packet 108 ('l')
+  for (let headerOffset of [3, 4, 5, 6, 7, 2, 1, 8]) {
+    for (let prefixLen of [2, 5, 3, 4]) {
+      let curr = headerOffset;
+      let players = [];
+      let valid = true;
+
+      while (curr < u.length) {
+        if (curr + prefixLen + 1 > u.length) { valid = false; break; }
+
+        let rawScore = (u[curr] << 8) | u[curr + 1];
+        let nameLenPos = curr + prefixLen;
+
+        if (nameLenPos >= u.length) { valid = false; break; }
+
+        let nameLen = u[nameLenPos];
+        if (nameLen > 35) { valid = false; break; }
+
+        let nameStart = nameLenPos + 1;
+        if (nameStart + nameLen > u.length) { valid = false; break; }
+
+        let nameBytes = u.subarray(nameStart, nameStart + nameLen);
+        curr = nameStart + nameLen;
+
+        let name = "";
+        try {
+          name = new TextDecoder("utf-8").decode(nameBytes);
+        } catch (e) {
+          for (let b of nameBytes) name += String.fromCharCode(b);
+        }
+        name = name.trim() || "(Anonymouse)";
+
+        let score = rawScore;
+        if (rawScore > 0) {
+          score = Math.floor(15 * (rawScore - 1) / 10);
+          if (score <= 0) score = rawScore;
+        }
+
+        players.push({ name, score });
+      }
+
+      if (valid && players.length >= 3 && players.length <= 12) {
+        if (players.length > bestPlayers.length) {
+          bestPlayers = players;
+        }
+      }
     }
   }
-  console.log("⚠️ No system Chromium found, falling back to default Puppeteer executable.");
-  return null;
+
+  return bestPlayers.length > 0 ? bestPlayers : null;
 }
 
-// ──────────────────────────────────────
-// 🌐 NTL SITE CLOUDFLARE SCRAPER
-// ──────────────────────────────────────
-async function startBrowserSession() {
-  console.log("🚀 Launching Stealth Browser for NTL RealTime Leaderboard...");
+function startSlitherSession() {
+  console.log("⚡ Connecting Direct WebSocket to Slither Server 8828 (148.113.20.151:444)...");
 
   try {
-    const browser = await puppeteer.launch({
-      headless: "new",
-      executablePath: findChromiumExecutable(), // Auto-detect path
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--disable-gpu",
-        "--disable-blink-features=AutomationControlled",
-        "--window-size=1920,1080"
-      ]
+    slitherWS = new WebSocket("ws://148.113.20.151:444/slither", {
+      headers: {
+        "Origin": "https://slither.io",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+      }
     });
 
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
+    let pingInterval = null;
+    let spawnInterval = null;
 
-    // Bypass Cloudflare challenge flags
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      Object.defineProperty(document, "hidden", { value: false, writable: false });
-      Object.defineProperty(document, "visibilityState", { value: "visible", writable: false });
+    slitherWS.on("open", () => {
+      console.log("✅ Direct WebSocket connected to Server 8828!");
+
+      // Protocol handshake
+      slitherWS.send(Buffer.from([1]));
+
+      // Ping frame every 250ms
+      pingInterval = setInterval(() => {
+        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
+          slitherWS.send(Buffer.from([251]));
+        }
+      }, 250);
+
+      // Spawn packet ('s', protocol 10, skin 0, name "JSR-Bot")
+      const spawnPacket = Buffer.from([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
+      slitherWS.send(spawnPacket);
+
+      spawnInterval = setInterval(() => {
+        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
+          slitherWS.send(spawnPacket);
+        }
+      }, 4000);
     });
 
-    console.log("⏳ Navigating to NTL RealTime Leaderboard (https://ntl-slither.com/ss/)...");
-    await page.goto("https://ntl-slither.com/ss/?reg=asia", { waitUntil: "domcontentloaded", timeout: 60000 });
+    slitherWS.on("message", (data) => {
+      if (!data) return;
+      const u = new Uint8Array(data);
+      if (u.length < 3) return;
 
-    // Handle Cloudflare challenge check loop
-    let title = await page.title();
-    let retries = 0;
-    while ((title.includes("Just a moment") || title.includes("Cloudflare") || title.includes("Attention Required")) && retries < 20) {
-      console.log("⏳ Waiting for Cloudflare verification on NTL site...");
-      await new Promise(r => setTimeout(r, 2000));
-      title = await page.title();
-      retries++;
-    }
-
-    console.log(`✅ Cloudflare Verification Passed! Page Title: "${title}"`);
-
-    // Scrape loop: Query NTL page memory and DOM for Server 8828 / 148.113.20.151
-    setInterval(async () => {
-      try {
-        const players = await page.evaluate(() => {
-          let list = [];
-
-          // Strategy 1: Read NTL global JavaScript server objects
-          const windowObjects = [window.servers, window.serverData, window.slitherServers, window.sList];
-          for (let obj of windowObjects) {
-            if (obj) {
-              const arr = Array.isArray(obj) ? obj : Object.values(obj);
-              const target = arr.find(s => s && (String(s.ip).includes("148.113.20.151") || String(s.port) === "444" || String(s.id).includes("8828")));
-              if (target && (target.leaderboard || target.lb || target.players)) {
-                const lb = target.leaderboard || target.lb || target.players;
-                if (Array.isArray(lb)) {
-                  return lb.map(p => ({
-                    name: String(p.name || p.nick || p.n || "(Anonymouse)").trim(),
-                    score: Math.floor(Number(p.score || p.length || p.s || 0))
-                  })).filter(p => p.score > 0);
-                }
-              }
-            }
-          }
-
-          // Strategy 2: Parse rendered HTML tables on NTL page
-          const rows = Array.from(document.querySelectorAll("table tr, .server_box, .server-card, div[id*='8828'], div[id*='148.113.20.151']"));
-          for (let row of rows) {
-            const text = row.innerText || "";
-            if (text.includes("148.113.20.151") || text.includes("8828")) {
-              const playerElements = row.querySelectorAll("li, .player, .lb_item, tr");
-              playerElements.forEach(el => {
-                const raw = el.innerText || "";
-                const match = raw.match(/^(?:\d+[\.\s]+)?(.+?)\s+[-–—:]?\s+([\d,]+)$/);
-                if (match) {
-                  const name = match[1].trim();
-                  const score = parseInt(match[2].replace(/,/g, ""), 10);
-                  if (name && !isNaN(score) && score > 0) {
-                    list.push({ name, score });
-                  }
-                }
-              });
-            }
-          }
-
-          // Strategy 3: Global document search for all leaderboard elements
-          if (list.length === 0) {
-            const allLbItems = Array.from(document.querySelectorAll(".lb_name, .nick"));
-            allLbItems.forEach(item => {
-              const name = item.innerText.trim();
-              const scoreEl = item.parentElement ? item.parentElement.querySelector(".lb_score, .score") : null;
-              if (name && scoreEl) {
-                const score = parseInt(scoreEl.innerText.replace(/,/g, ""), 10);
-                if (!isNaN(score) && score > 0) {
-                  list.push({ name, score });
-                }
-              }
-            });
-          }
-
-          return list;
-        });
-
-        if (Array.isArray(players) && players.length > 0) {
+      // Opcode 108 ('l') = Leaderboard Packet
+      if (u[0] === 108) {
+        const players = parseBinaryLeaderboard(u);
+        if (players && players.length > 0) {
           latestPlayers = players;
         }
-      } catch (err) {
-        // Page evaluation guard
       }
-    }, 2000);
-
-    browser.on("disconnected", () => {
-      console.log("Browser disconnected. Restarting in 5s...");
-      setTimeout(startBrowserSession, 5000);
     });
+
+    slitherWS.on("error", (err) => {
+      console.log("⚠️ Slither WS Error:", err.message);
+    });
+
+    slitherWS.on("close", (code) => {
+      console.log(`🔌 Slither WS closed (code ${code}). Reconnecting in 3s...`);
+      clearInterval(pingInterval);
+      clearInterval(spawnInterval);
+      setTimeout(startSlitherSession, 3000);
+    });
+
   } catch (err) {
-    console.error("NTL Scraper error:", err.message);
-    setTimeout(startBrowserSession, 5000);
+    console.error("❌ WS Launch error:", err.message);
+    setTimeout(startSlitherSession, 3000);
   }
 }
 
@@ -229,7 +213,7 @@ function buildLeaderboardEmbed(players) {
 
   return {
     color: 0x7b2fff,
-    author: { name: "🇮🇳 Slither Server 8828 (via NTL)" },
+    author: { name: "🇮🇳 Slither Server 8828" },
     title: "🐍 Leaderboard (Top 10)",
     description: board || "Waiting for data...",
     fields: [
@@ -317,7 +301,7 @@ client.once("clientReady", async () => {
       return; 
     }
 
-    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players loaded from NTL`);
+    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players loaded`);
 
     try {
       const embed = buildLeaderboardEmbed(players);
@@ -339,5 +323,5 @@ client.once("clientReady", async () => {
   setInterval(runLoop, ALERT_INTERVAL);
 });
 
-startBrowserSession();
+startSlitherSession();
 client.login(TOKEN);
