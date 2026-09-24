@@ -1,7 +1,7 @@
-
 const { Client, GatewayIntentBits } = require("discord.js");
 const puppeteer = require("puppeteer");
 const http = require("http");
+const fs = require("fs"); // Added to check local file paths
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
@@ -65,15 +65,35 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 🌐 CLOUDFLARE STEALTH BROWSER INTERCEPTOR
+// 🔍 AUTOMATIC CHROMIUM PATH FINDER
+// ──────────────────────────────────────
+function findChromiumExecutable() {
+  const possiblePaths = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome"
+  ];
+  for (const path of possiblePaths) {
+    if (fs.existsSync(path)) {
+      console.log(`✅ Found system Chromium at: ${path}`);
+      return path;
+    }
+  }
+  console.log("⚠️ No system Chromium found, falling back to default Puppeteer executable.");
+  return null;
+}
+
+// ──────────────────────────────────────
+// 🌐 NTL SITE CLOUDFLARE SCRAPER
 // ──────────────────────────────────────
 async function startBrowserSession() {
-  console.log("🚀 Launching Stealth Browser Interceptor...");
+  console.log("🚀 Launching Stealth Browser for NTL RealTime Leaderboard...");
 
   try {
     const browser = await puppeteer.launch({
       headless: "new",
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+      executablePath: findChromiumExecutable(), // Auto-detect path
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -89,90 +109,104 @@ async function startBrowserSession() {
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
-    // Mask Puppeteer automated flags to pass Cloudflare verification
+    // Bypass Cloudflare challenge flags
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       Object.defineProperty(document, "hidden", { value: false, writable: false });
       Object.defineProperty(document, "visibilityState", { value: "visible", writable: false });
-      window.requestAnimationFrame = (cb) => setTimeout(cb, 1000 / 60);
     });
 
-    // Node bridge callback
-    await page.exposeFunction("onLeaderboardUpdate", (players) => {
-      if (Array.isArray(players) && players.length > 0) {
-        latestPlayers = players;
-      }
-    });
+    console.log("⏳ Navigating to NTL RealTime Leaderboard (https://ntl-slither.com/ss/)...");
+    await page.goto("https://ntl-slither.com/ss/?reg=asia", { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    console.log("⏳ Navigating to Slither & waiting for Cloudflare verification...");
-    await page.goto("https://slither.io", { waitUntil: "domcontentloaded", timeout: 60000 });
-
-    // Wait for Cloudflare Turnstile / Challenge resolution
+    // Handle Cloudflare challenge check loop
     let title = await page.title();
     let retries = 0;
-    while ((title.includes("Just a moment") || title.includes("Attention Required") || title.includes("Cloudflare")) && retries < 15) {
-      console.log("⏳ Waiting for Cloudflare verification to complete...");
+    while ((title.includes("Just a moment") || title.includes("Cloudflare") || title.includes("Attention Required")) && retries < 20) {
+      console.log("⏳ Waiting for Cloudflare verification on NTL site...");
       await new Promise(r => setTimeout(r, 2000));
       title = await page.title();
       retries++;
     }
 
-    console.log(`✅ Cloudflare passed! Current Page Title: "${title}"`);
+    console.log(`✅ Cloudflare Verification Passed! Page Title: "${title}"`);
 
-    // Inject Server 8828 override & continuous game state reader
-    await page.evaluate(() => {
-      window.bServerIp = "148.113.20.151";
-      window.bServerPort = 444;
+    // Scrape loop: Query NTL page memory and DOM for Server 8828 / 148.113.20.151
+    setInterval(async () => {
+      try {
+        const players = await page.evaluate(() => {
+          let list = [];
 
-      function forceJoin() {
-        if (typeof window.play_slither === "function") {
-          window.play_slither();
-        } else {
-          const btn = document.querySelector("#playh .nsi") || document.getElementById("playbtn");
-          if (btn) btn.click();
-        }
-      }
-
-      forceJoin();
-      setInterval(forceJoin, 5000);
-
-      // Extract current leaderboard directly from NTL / Slither runtime object arrays
-      setInterval(() => {
-        const nativeMembers = window.members || window.lb_p || window.leaderboard || window.lbs;
-        if (Array.isArray(nativeMembers) && nativeMembers.length > 0) {
-          const parsed = nativeMembers.map(m => {
-            let name = m.nk || m.nick || m.name || m.n || "(Anonymouse)";
-            let score = 0;
-
-            if (typeof m.s === "number" && m.s > 0) {
-              score = m.s;
-            } else if (typeof m.score === "number" && m.score > 0) {
-              score = m.score;
-            } else if (m.sct && window.fpsls && window.fmlts) {
-              score = Math.floor(15 * (window.fpsls[m.sct] + (m.fam || 0) / window.fmlts[m.sct] - 1) - 5);
+          // Strategy 1: Read NTL global JavaScript server objects
+          const windowObjects = [window.servers, window.serverData, window.slitherServers, window.sList];
+          for (let obj of windowObjects) {
+            if (obj) {
+              const arr = Array.isArray(obj) ? obj : Object.values(obj);
+              const target = arr.find(s => s && (String(s.ip).includes("148.113.20.151") || String(s.port) === "444" || String(s.id).includes("8828")));
+              if (target && (target.leaderboard || target.lb || target.players)) {
+                const lb = target.leaderboard || target.lb || target.players;
+                if (Array.isArray(lb)) {
+                  return lb.map(p => ({
+                    name: String(p.name || p.nick || p.n || "(Anonymouse)").trim(),
+                    score: Math.floor(Number(p.score || p.length || p.s || 0))
+                  })).filter(p => p.score > 0);
+                }
+              }
             }
-
-            return {
-              name: String(name).trim() || "(Anonymouse)",
-              score: Math.max(0, Math.floor(score))
-            };
-          });
-
-          if (parsed.length > 0 && window.onLeaderboardUpdate) {
-            window.onLeaderboardUpdate(parsed);
           }
-        }
-      }, 1000);
-    });
 
-    console.log("⚡ Network Interceptor active on Server 8828 (https://slither.io).");
+          // Strategy 2: Parse rendered HTML tables on NTL page
+          const rows = Array.from(document.querySelectorAll("table tr, .server_box, .server-card, div[id*='8828'], div[id*='148.113.20.151']"));
+          for (let row of rows) {
+            const text = row.innerText || "";
+            if (text.includes("148.113.20.151") || text.includes("8828")) {
+              const playerElements = row.querySelectorAll("li, .player, .lb_item, tr");
+              playerElements.forEach(el => {
+                const raw = el.innerText || "";
+                const match = raw.match(/^(?:\d+[\.\s]+)?(.+?)\s+[-–—:]?\s+([\d,]+)$/);
+                if (match) {
+                  const name = match[1].trim();
+                  const score = parseInt(match[2].replace(/,/g, ""), 10);
+                  if (name && !isNaN(score) && score > 0) {
+                    list.push({ name, score });
+                  }
+                }
+              });
+            }
+          }
+
+          // Strategy 3: Global document search for all leaderboard elements
+          if (list.length === 0) {
+            const allLbItems = Array.from(document.querySelectorAll(".lb_name, .nick"));
+            allLbItems.forEach(item => {
+              const name = item.innerText.trim();
+              const scoreEl = item.parentElement ? item.parentElement.querySelector(".lb_score, .score") : null;
+              if (name && scoreEl) {
+                const score = parseInt(scoreEl.innerText.replace(/,/g, ""), 10);
+                if (!isNaN(score) && score > 0) {
+                  list.push({ name, score });
+                }
+              }
+            });
+          }
+
+          return list;
+        });
+
+        if (Array.isArray(players) && players.length > 0) {
+          latestPlayers = players;
+        }
+      } catch (err) {
+        // Page evaluation guard
+      }
+    }, 2000);
 
     browser.on("disconnected", () => {
       console.log("Browser disconnected. Restarting in 5s...");
       setTimeout(startBrowserSession, 5000);
     });
   } catch (err) {
-    console.error("Browser launch error:", err.message);
+    console.error("NTL Scraper error:", err.message);
     setTimeout(startBrowserSession, 5000);
   }
 }
@@ -195,7 +229,7 @@ function buildLeaderboardEmbed(players) {
 
   return {
     color: 0x7b2fff,
-    author: { name: "🇮🇳 Slither Server 8828" },
+    author: { name: "🇮🇳 Slither Server 8828 (via NTL)" },
     title: "🐍 Leaderboard (Top 10)",
     description: board || "Waiting for data...",
     fields: [
@@ -283,7 +317,7 @@ client.once("clientReady", async () => {
       return; 
     }
 
-    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players loaded`);
+    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players loaded from NTL`);
 
     try {
       const embed = buildLeaderboardEmbed(players);
