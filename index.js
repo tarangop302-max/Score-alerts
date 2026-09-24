@@ -130,7 +130,8 @@ function startSlitherSession() {
   try {
     slitherWS = new WebSocket("ws://148.113.20.151:444/slither", {
       headers: {
-        "Origin": "https://slither.io",
+        "Origin": "https://slither.com",
+        "Host": "slither.com",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
@@ -169,6 +170,10 @@ function startSlitherSession() {
       const u = new Uint8Array(data);
       if (u.length < 2) return;
 
+      // 🔍 DIAGNOSTIC: log the first bytes of every message we get, so we
+      // can see what the server actually sends (or confirm it sends nothing).
+      console.log(`📥 Raw msg (${u.length}b): ${Buffer.from(u.slice(0, 24)).toString("hex")}`);
+
       // Opcode 108 ('l') = Leaderboard Packet
       if (u[0] === 108) {
         const players = parseBinaryLeaderboard(u);
@@ -182,8 +187,11 @@ function startSlitherSession() {
       console.log("⚠️ Slither WS Error:", err.message);
     });
 
-    slitherWS.on("close", (code) => {
-      console.log(`🔌 Slither WS closed (code ${code}). Reconnecting in 5s...`);
+    slitherWS.on("close", (code, reason) => {
+      // 🔍 DIAGNOSTIC: the close reason buffer often explains *why* the
+      // server dropped us (protocol error, bad handshake, rate limit, etc).
+      const reasonStr = reason && reason.length ? reason.toString() : "(no reason given)";
+      console.log(`🔌 Slither WS closed (code ${code}) — ${reasonStr}. Reconnecting in 5s...`);
       if (pingInterval) clearInterval(pingInterval);
       setTimeout(startSlitherSession, 5000);
     });
