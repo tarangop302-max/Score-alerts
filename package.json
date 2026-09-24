@@ -1,12 +1,16 @@
 {
-  "name": "jsr-bot",
+  "name": "jsr-slither-bot",
   "version": "1.0.0",
+  "description": "JSR Slither Leaderboard Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "puppeteer": "^22.0.0"
+    "discord.js": "^14.15.3",
+    "puppeteer": "^22.10.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
