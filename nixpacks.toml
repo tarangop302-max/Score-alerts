@@ -1,5 +1,20 @@
-[phases.setup]
-nixPkgs = ["...", "chromium", "nss", "freetype", "harfbuzz", "ca-certificates"]
+[providers]
+providers = ["node"]
 
-[env]
-PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+[pkgs]
+pkgs = [
+  "chromium",
+  "nss",
+  "atk",
+  "cups",
+  "libXcomposite",
+  "libXcursor",
+  "libXdamage",
+  "libXext",
+  "libXi",
+  "libXrandr",
+  "libXScrnSaver",
+  "libXtst",
+  "pango",
+  "at-spi2-atk"
+]
