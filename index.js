@@ -91,19 +91,46 @@ function wyrmFetch(path) {
   });
 }
 
-async function fetchLeaderboard() {
-  const data = await wyrmFetch(`/v1/data/arenas/${SERVER_CODE}/leaderboard`);
+// ──────────────────────────────────────
+// 🏆 FETCH LEADERBOARD (via master /arenas?include=leaderboard endpoint)
+// ──────────────────────────────────────
+let loggedShapeOnce = false;
 
-  // Try common response shapes
-  let entries = data.leaderboard || data.top || data.players || data.entries || data;
-  if (!Array.isArray(entries)) {
-    // Might be nested under arena
-    entries = data.arena?.leaderboard || [];
+async function fetchLeaderboard() {
+  const data = await wyrmFetch(`/v1/data/arenas?include=leaderboard`);
+
+  const arenas = data.arenas || [];
+
+  if (!loggedShapeOnce) {
+    console.log(`ARENAS FOUND: ${arenas.length}`);
+    if (arenas[0]) console.log("SAMPLE ARENA KEYS:", Object.keys(arenas[0]));
+  }
+
+  // Match our server by code or address, whichever field the API uses
+  const target = arenas.find(a =>
+    String(a.code) === SERVER_CODE ||
+    String(a.server_code) === SERVER_CODE ||
+    String(a.id) === SERVER_CODE ||
+    a.address === SERVER_CODE ||
+    a.ip === SERVER_CODE
+  );
+
+  if (!target) {
+    console.log(`⚠️ Server ${SERVER_CODE} not found. Available:`,
+      arenas.map(a => a.code || a.server_code || a.id || a.address).join(", "));
+    return [];
+  }
+
+  const entries = target.leaderboard || target.top || target.players || [];
+
+  if (!loggedShapeOnce && entries.length) {
+    console.log("SAMPLE ENTRY:", JSON.stringify(entries[0]));
+    loggedShapeOnce = true;
   }
 
   const players = entries.map(e => ({
-    name: e.name || e.nick || e.nk || "(no name)",
-    score: e.score || e.length || e.len || e.sc || 0,
+    name: e.name || e.nick || e.nk || e.username || e.player || "(no name)",
+    score: e.score ?? e.length ?? e.len ?? e.sc ?? e.points ?? 0,
   })).filter(p => p.score > 0);
 
   return players.sort((a, b) => b.score - a.score);
