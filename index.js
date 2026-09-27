@@ -1,11 +1,11 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const WebSocket = require("ws");
+const https = require("https");
 const http = require("http");
 
 process.on("unhandledRejection", err => console.log("Unhandled:", err?.message));
 process.on("uncaughtException", err => console.log("Uncaught:", err?.message));
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("JSR BOT IS ALIVE ✅");
@@ -22,15 +22,19 @@ const TOKEN           = T1 + T2;
 const CHANNEL_ID      = "1490713616813523004";
 const KING_CHANNEL_ID = "1515569728851017788";
 const ALERT_ROLE      = "<@&1493480046986268803>";
-const ALERT_INTERVAL  = 15000;
+const ALERT_INTERVAL  = 20000;
 
-let activePlayers      = new Set();
-const alerted30        = new Set();
-const alerted80        = new Set();
-const jsr20            = new Set();
-const jsr50            = new Set();
+// 🐍 Wyrm API — direct server data, no scraping needed
+const WYRM_BASE   = "https://wyrm-api.77-245-76-86.sslip.io";
+const WYRM_KEY    = "wyrm_live_jN6USG2YxKOWbiKfvivojZ7__HUKnQwj";
+const SERVER_CODE = "8828";
+
+let activePlayers    = new Set();
+const alerted30      = new Set();
+const alerted80      = new Set();
+const jsr20          = new Set();
+const jsr50          = new Set();
 let leaderboardMessage = null;
-let latestPlayers      = [];
 
 // ──────────────────────────────────────
 // 🏷️ TEAM DETECTION
@@ -64,142 +68,45 @@ function truncateName(name, max = 22) {
 }
 
 // ──────────────────────────────────────
-// 📡 FIXED SLITHER WEBSOCKET CLIENT
+// 🌐 WYRM API FETCH
 // ──────────────────────────────────────
-let slitherWS = null;
-
-function parseBinaryLeaderboard(buf) {
-  const u = new Uint8Array(buf);
-  if (u[0] !== 108 || u.length < 8) return null;
-
-  let bestPlayers = [];
-
-  for (let headerOffset of [3, 4, 5, 6, 7, 2, 1, 8]) {
-    for (let prefixLen of [2, 5, 3, 4]) {
-      let curr = headerOffset;
-      let players = [];
-      let valid = true;
-
-      while (curr < u.length) {
-        if (curr + prefixLen + 1 > u.length) { valid = false; break; }
-
-        let rawScore = (u[curr] << 8) | u[curr + 1];
-        let nameLenPos = curr + prefixLen;
-
-        if (nameLenPos >= u.length) { valid = false; break; }
-
-        let nameLen = u[nameLenPos];
-        if (nameLen > 35) { valid = false; break; }
-
-        let nameStart = nameLenPos + 1;
-        if (nameStart + nameLen > u.length) { valid = false; break; }
-
-        let nameBytes = u.subarray(nameStart, nameStart + nameLen);
-        curr = nameStart + nameLen;
-
-        let name = "";
-        try {
-          name = new TextDecoder("utf-8").decode(nameBytes);
-        } catch (e) {
-          for (let b of nameBytes) name += String.fromCharCode(b);
+function wyrmFetch(path) {
+  return new Promise((resolve, reject) => {
+    const url = WYRM_BASE + path;
+    const req = https.get(url, {
+      headers: { accept: "application/json", "X-Wyrm-Key": WYRM_KEY }
+    }, (res) => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`HTTP ${res.statusCode}: ${data.substring(0, 200)}`));
         }
-        name = name.trim() || "(Anonymouse)";
-
-        let score = rawScore;
-        if (rawScore > 15) {
-          score = Math.floor((rawScore - 15) / 10);
-        }
-
-        players.push({ name, score });
-      }
-
-      if (valid && players.length >= 3 && players.length <= 12) {
-        if (players.length > bestPlayers.length) {
-          bestPlayers = players;
-        }
-      }
-    }
-  }
-
-  return bestPlayers.length > 0 ? bestPlayers : null;
+        try { resolve(JSON.parse(data)); }
+        catch(e) { reject(new Error("Invalid JSON response")); }
+      });
+    });
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error("Timeout")); });
+    req.on("error", reject);
+  });
 }
 
-function startSlitherSession() {
-  console.log("⚡ Connecting Direct WebSocket to Slither Server 8828 (148.113.20.151:444)...");
+async function fetchLeaderboard() {
+  const data = await wyrmFetch(`/v1/data/arenas/${SERVER_CODE}/leaderboard`);
 
-  try {
-    slitherWS = new WebSocket("ws://148.113.20.151:444/slither", {
-      headers: {
-        "Origin": "https://slither.com",
-        "Host": "slither.com",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
-      }
-    });
-
-    let pingInterval = null;
-
-    // ── KEY FIX ────────────────────────────────────────────────
-    // The old code waited for an incoming "message" before sending
-    // the protocol/spawn packets. If the server never speaks first,
-    // that handshake never fires, the bot sends nothing, and the
-    // server drops the idle socket (abnormal close, code 1006)
-    // after a short timeout. Send the handshake immediately on open.
-    slitherWS.on("open", () => {
-      console.log("✅ Direct WebSocket connected to Server 8828!");
-
-      // Send Protocol 10 Initialization
-      slitherWS.send(Buffer.from([10]));
-
-      // Send Spawn Packet ("s", protocol 10, skin 0, name "JSR-Bot")
-      const spawnPacket = Buffer.from([115, 10, 0, 7, 74, 83, 82, 45, 66, 111, 116]);
-      slitherWS.send(spawnPacket);
-
-      // Ping keepalive every 1000ms to prevent rate-limit drop
-      pingInterval = setInterval(() => {
-        if (slitherWS && slitherWS.readyState === WebSocket.OPEN) {
-          slitherWS.send(Buffer.from([251]));
-        }
-      }, 1000);
-    });
-
-    slitherWS.on("message", (data) => {
-      if (!data) return;
-      const u = new Uint8Array(data);
-      if (u.length < 2) return;
-
-      // 🔍 DIAGNOSTIC: log the first bytes of every message we get, so we
-      // can see what the server actually sends (or confirm it sends nothing).
-      console.log(`📥 Raw msg (${u.length}b): ${Buffer.from(u.slice(0, 24)).toString("hex")}`);
-
-      // Opcode 108 ('l') = Leaderboard Packet
-      if (u[0] === 108) {
-        const players = parseBinaryLeaderboard(u);
-        if (players && players.length > 0) {
-          latestPlayers = players;
-        }
-      }
-    });
-
-    slitherWS.on("error", (err) => {
-      console.log("⚠️ Slither WS Error:", err.message);
-    });
-
-    slitherWS.on("close", (code, reason) => {
-      // 🔍 DIAGNOSTIC: the close reason buffer often explains *why* the
-      // server dropped us (protocol error, bad handshake, rate limit, etc).
-      const reasonStr = reason && reason.length ? reason.toString() : "(no reason given)";
-      console.log(`🔌 Slither WS closed (code ${code}) — ${reasonStr}. Reconnecting in 5s...`);
-      if (pingInterval) clearInterval(pingInterval);
-      setTimeout(startSlitherSession, 5000);
-    });
-
-  } catch (err) {
-    console.error("❌ WS Launch error:", err.message);
-    setTimeout(startSlitherSession, 5000);
+  // Try common response shapes
+  let entries = data.leaderboard || data.top || data.players || data.entries || data;
+  if (!Array.isArray(entries)) {
+    // Might be nested under arena
+    entries = data.arena?.leaderboard || [];
   }
+
+  const players = entries.map(e => ({
+    name: e.name || e.nick || e.nk || "(no name)",
+    score: e.score || e.length || e.len || e.sc || 0,
+  })).filter(p => p.score > 0);
+
+  return players.sort((a, b) => b.score - a.score);
 }
 
 // ──────────────────────────────────────
@@ -207,17 +114,16 @@ function startSlitherSession() {
 // ──────────────────────────────────────
 function buildLeaderboardEmbed(players) {
   const top10 = players.slice(0, 10);
-  const totalScore = players.reduce((s, p) => s + p.score, 0);
+  const totalScore = players.reduce((s,p) => s+p.score, 0);
   const now = new Date();
-  const dateStr = now.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
-  const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
-  const ICONS = ["🥇", "🥈", "🥉"];
+  const dateStr = now.toLocaleDateString("en-GB", { timeZone:"Asia/Kolkata", day:"2-digit", month:"2-digit", year:"numeric" });
+  const timeStr = now.toLocaleTimeString("en-IN", { timeZone:"Asia/Kolkata", hour:"2-digit", minute:"2-digit", hour12:true });
+  const ICONS = ["🥇","🥈","🥉"];
   let board = "";
-  top10.forEach((p, i) => {
+  top10.forEach((p,i) => {
     const team = detectTeam(p.name);
-    board += `${ICONS[i] || `#${i + 1}`} ${team ? TEAMS[team].emoji + " " : ""}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
+    board += `${ICONS[i]||`#${i+1}`} ${team?TEAMS[team].emoji+" ":""}**${truncateName(p.name)}** — ${p.score.toLocaleString()}\n`;
   });
-
   return {
     color: 0x7b2fff,
     author: { name: "🇮🇳 Slither Server 8828" },
@@ -225,8 +131,8 @@ function buildLeaderboardEmbed(players) {
     description: board || "Waiting for data...",
     fields: [
       { name: "💯 Total Score", value: totalScore.toLocaleString(), inline: true },
-      { name: "👥 Players",     value: String(players.length),      inline: true },
-      { name: "🕐 Updated",     value: "Just now",                  inline: true },
+      { name: "👥 Players", value: String(players.length), inline: true },
+      { name: "🕐 Updated", value: "Just now", inline: true },
       { name: "🏷️ Teams", value: "🟠 JSR  🔵 SMT  🔴 DINO  🟡 LWK  🟢 IND", inline: false },
     ],
     footer: { text: `Powered by JSR Gaming  •  Last Refresh | ${dateStr} ${timeStr}` },
@@ -284,7 +190,7 @@ async function processAlerts(players, channel) {
 // ──────────────────────────────────────
 // 🚀 BOT READY
 // ──────────────────────────────────────
-client.once("clientReady", async () => {
+client.once("ready", async () => {
   console.log(`✅ Discord bot ready: ${client.user.tag}`);
 
   const channel     = await client.channels.fetch(CHANNEL_ID).catch(e => { console.log("❌ CHANNEL_ID:", e.message); return null; });
@@ -301,14 +207,21 @@ client.once("clientReady", async () => {
   }, 3 * 60 * 60 * 1000);
 
   async function runLoop() {
-    const players = latestPlayers;
-
-    if (!players.length) { 
-      console.log("⚠️ Waiting for leaderboard array from Slither session..."); 
-      return; 
+    let players;
+    try {
+      players = await fetchLeaderboard();
+    } catch(e) {
+      console.log("❌ Wyrm API error:", e.message);
+      return;
     }
 
-    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players loaded`);
+    if (!players.length) {
+      console.log(`⚠️ ${new Date().toLocaleTimeString()} — No players`);
+      return;
+    }
+
+    console.log(`📊 ${new Date().toLocaleTimeString()} — ${players.length} players`);
+    players.slice(0,3).forEach((p,i) => console.log(`  #${i+1} ${p.name} — ${p.score}`));
 
     try {
       const embed = buildLeaderboardEmbed(players);
@@ -316,10 +229,10 @@ client.once("clientReady", async () => {
         await leaderboardMessage.edit({ embeds: [embed] });
       } else {
         leaderboardMessage = await kingChannel.send({ embeds: [embed] });
-        console.log("🏆 Leaderboard message posted!");
+        console.log("🏆 Leaderboard created!");
       }
     } catch(e) {
-      console.log("❌ Discord edit error:", e.message);
+      console.log("❌ Discord error:", e.message);
       leaderboardMessage = null;
     }
 
@@ -330,5 +243,4 @@ client.once("clientReady", async () => {
   setInterval(runLoop, ALERT_INTERVAL);
 });
 
-startSlitherSession();
 client.login(TOKEN);
