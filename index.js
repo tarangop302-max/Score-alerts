@@ -121,10 +121,14 @@ async function fetchLeaderboard() {
     return [];
   }
 
-  const entries = target.leaderboard || target.top || target.players || [];
+  const entries = Array.isArray(target.topTen) ? target.topTen
+    : Array.isArray(target.leaderboard) ? target.leaderboard
+    : Array.isArray(target.top) ? target.top
+    : [];
 
-  if (!loggedShapeOnce && entries.length) {
-    console.log("SAMPLE ENTRY:", JSON.stringify(entries[0]));
+  if (!loggedShapeOnce) {
+    console.log(`ENTRIES COUNT for ${SERVER_CODE}: ${entries.length}`);
+    if (entries.length) console.log("SAMPLE ENTRY:", JSON.stringify(entries[0]));
     loggedShapeOnce = true;
   }
 
