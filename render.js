@@ -159,6 +159,11 @@ function drawMap(ctx, mapData, opts) {
   ctx.fillText("LIVE MAP", 24, 48);
   ctx.fillStyle = "#9d8fc4"; ctx.font = `16px ${FONT}`;
   ctx.fillText(`Slither Server ${serverCode}`, 24, 72);
+  if (mapData.players != null) {
+    ctx.textAlign = "right"; ctx.fillStyle = "#ffffff"; ctx.font = `bold 20px ${FONT}`;
+    ctx.fillText(`${mapData.players} players`, W - 24, 48);
+    ctx.textAlign = "left";
+  }
 
   // arena disc with soft red rim (like the in-game minimap)
   ctx.save();
@@ -175,6 +180,11 @@ function drawMap(ctx, mapData, opts) {
   // faint rings
   ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 1;
   for (const f of [0.33, 0.66]) { ctx.beginPath(); ctx.arc(cx, cy, R * f, 0, Math.PI * 2); ctx.stroke(); }
+
+  // live preview picture from the Wyrm status feed (already a rendered minimap)
+  if (mapData.svgImage) {
+    ctx.drawImage(mapData.svgImage, cx - R, cy - R, R * 2, R * 2);
+  }
 
   // bitmap-style minimap
   if (mapData.cells && mapData.cells.size) {
