@@ -98,4 +98,63 @@ async function runMapFind({ base, key, code, arenaKeys }) {
   return redact(out.join("\n"));
 }
 
-module.exports = { runMapFind };
+
+// ─────────────────────────────────────────────
+// Second pass: read the website's minimap/spectator code and the /v1/live + /v1/arena endpoints
+// ─────────────────────────────────────────────
+function findKeys(obj, path, out, depth = 0) {
+  if (depth > 6 || obj === null || typeof obj !== "object") return;
+  if (Array.isArray(obj)) { if (obj.length) findKeys(obj[0], path + "[0]", out, depth + 1); return; }
+  for (const [k, v] of Object.entries(obj)) {
+    const p = path + "." + k;
+    if (/map|radar|bitmap|cell|pixel|snake|spectat|grid|point|segment|stream|ws|socket|url/i.test(k))
+      out.push(`${p}: ${Array.isArray(v) ? "array(" + v.length + ")" : typeof v}${typeof v === "string" ? " = " + v.slice(0, 120) : ""}`);
+    findKeys(v, p, out, depth + 1);
+  }
+}
+
+async function runMapFind2({ base, key, code }) {
+  const out = [];
+  const H = { accept: "application/json", "X-Wyrm-Key": key };
+
+  out.push("##### A. WEBSITE CODE AROUND MINIMAP / SPECTATOR #####");
+  const home = await getRaw(SITE);
+  const html = home.buf.toString("utf8");
+  const srcs = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/g)].map(m => new URL(m[1], SITE).toString());
+  let js = "";
+  for (const u of srcs.slice(0, 3)) { const r = await getRaw(u); if (r.status === 200) js += r.buf.toString("utf8") + "\n"; }
+  out.push(`js length: ${js.length}`);
+  const markers = ["function Pv(", "/v1/live/arenas", "/v1/arena/status", "spectator:", "new WebSocket", "EventSource", "getContext(", "minimap", "fetch("];
+  for (const mk of markers) {
+    let from = 0, n = 0;
+    while (n < 2) {
+      const i = js.indexOf(mk, from);
+      if (i < 0) break;
+      out.push(`\n--- "${mk}" #${n + 1} ---\n` + js.slice(Math.max(0, i - 150), i + 900).replace(/\s+/g, " "));
+      from = i + mk.length; n++;
+    }
+    if (n === 0) out.push(`\n--- "${mk}" not found ---`);
+  }
+
+  out.push("\n\n##### B. LIVE / STATUS ENDPOINTS #####");
+  const paths = [
+    "/v1/live/arenas?include=leaderboard", "/v1/live/arenas", `/v1/live/arenas/${code}`,
+    "/v1/arena/status", `/v1/arena/status?code=${code}`, `/v1/arena/${code}/status`, `/v1/arena/${code}`,
+  ];
+  for (const p of paths) {
+    const r = await getRaw(base + p, H);
+    let desc = "";
+    if (r.status === 200 && /json/.test(r.type)) {
+      try {
+        const j = JSON.parse(r.buf.toString("utf8"));
+        const found = []; findKeys(j, "$", found);
+        desc = "\n   shape: " + shape(j, 0).slice(0, 700) + "\n   interesting keys:\n   " + (found.slice(0, 40).join("\n   ") || "none");
+      } catch { desc = " invalid json"; }
+    } else if (r.status === 200) desc = " " + r.type;
+    out.push(`GET ${p} -> ${r.status} ${r.type.split(";")[0]} ${r.size}b${desc}`);
+  }
+  out.push("\nDONE");
+  return redact(out.join("\n"));
+}
+
+module.exports = { runMapFind, runMapFind2 };
