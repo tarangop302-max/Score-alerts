@@ -270,13 +270,17 @@ function normaliseMapData(md) {
 }
 
 // The Wyrm website's own public feed: every server has a live "preview" picture of snake positions
+function findStatusServer(servers, arena) {
+  const mine = arena ? [arena.address, arena.ipv4Address, arena.ipv4].filter(Boolean).map(String) : [];
+  return servers.find(s => [s.code, s.address, s.ipv4Address, s.ipv4].some(v => v != null && (String(v) === SERVER_CODE || mine.includes(String(v))))) || null;
+}
+
 let statusCache = { t: 0, md: null };
 async function fetchMapFromStatus() {
   if (statusCache.md && Date.now() - statusCache.t < 4000) return statusCache.md; // be gentle with the API
   const [status, arena] = await Promise.all([wyrmFetch("/v1/arena/status"), fetchArena("leaderboard")]);
   const servers = status.servers || [];
-  const mine = arena ? [arena.address, arena.ipv4Address, arena.ipv4].filter(Boolean).map(String) : [];
-  const match = servers.find(s => [s.code, s.address, s.ipv4Address, s.ipv4].some(v => v != null && (String(v) === SERVER_CODE || mine.includes(String(v)))));
+  const match = findStatusServer(servers, arena);
   if (!match) { console.log("MAP: server not found in /v1/arena/status. Server keys:", servers[0] ? Object.keys(servers[0]) : "none"); return null; }
   const url = match.preview && match.preview.dataUrl;
   if (!url || !url.startsWith("data:image/")) { console.log("MAP: no preview.dataUrl. Preview:", JSON.stringify(match.preview || null).slice(0, 200)); return null; }
@@ -414,6 +418,34 @@ client.on("messageCreate", async (msg) => {
       await msg.reply("🔎 Reading the Wyrm minimap code, this takes up to ~1 minute...");
       const report = await runMapFind2({ base: WYRM_BASE, key: WYRM_KEY, code: SERVER_CODE });
       return void msg.reply({ files: [new AttachmentBuilder(Buffer.from(report, "utf8"), { name: "mapfind2-output.txt" })] });
+    }
+
+    // "!mapraw" — admin-only: sends the raw Wyrm preview picture + which server it matched
+    if (text === "mapraw") {
+      if (!msg.member?.permissions.has("ManageGuild")) return;
+      const [status, arena] = await Promise.all([wyrmFetch("/v1/arena/status"), fetchArena("leaderboard")]);
+      const servers = status.servers || [];
+      const match = findStatusServer(servers, arena);
+      const L = [];
+      L.push("status keys: " + Object.keys(status).join(", "));
+      L.push("my arena: " + JSON.stringify(arena ? { code: arena.code, address: arena.address, ipv4Address: arena.ipv4Address, players: arena.players } : null));
+      L.push("\nALL SERVERS in status feed:");
+      servers.forEach((s, n) => L.push(`#${n} code=${s.code} address=${s.address} ipv4=${s.ipv4Address || s.ipv4} players=${s.players} previewKeys=[${Object.keys(s.preview || {}).join(",")}] dataUrlLen=${(s.preview?.dataUrl || "").length}${s === match ? "   <== MATCHED" : ""}`));
+      L.push("\nMATCHED server keys: " + (match ? Object.keys(match).join(", ") : "none"));
+      if (match) {
+        const pv = { ...(match.preview || {}) }; delete pv.dataUrl;
+        L.push("MATCHED preview (without dataUrl): " + JSON.stringify(pv).slice(0, 1500));
+        const rest = { ...match }; delete rest.preview;
+        L.push("MATCHED other fields: " + JSON.stringify(rest).slice(0, 1500));
+      }
+      const files = [new AttachmentBuilder(Buffer.from(L.join("\n"), "utf8"), { name: "mapraw-report.txt" })];
+      const url = match?.preview?.dataUrl;
+      if (url && url.startsWith("data:image/svg+xml")) {
+        const comma = url.indexOf(",");
+        const svg = url.slice(0, comma).includes(";base64") ? Buffer.from(url.slice(comma + 1), "base64") : Buffer.from(decodeURIComponent(url.slice(comma + 1)), "utf8");
+        files.push(new AttachmentBuilder(svg, { name: "wyrm-preview-8828.svg" }));
+      }
+      return void msg.reply({ files });
     }
 
     const wantsDebug = text === "mapdebug";
