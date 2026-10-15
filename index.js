@@ -5,7 +5,7 @@ const https = require("https");
 const http = require("http");
 const { LB, MAP, drawLeaderboard, drawMap } = require("./render");
 const { runProbe } = require("./probe");
-const { runMapFind } = require("./findmap");
+const { runMapFind, runMapFind2 } = require("./findmap");
 
 // Bundled fonts so the images look the same on any host
 const fs = require("fs");
@@ -376,6 +376,13 @@ client.on("messageCreate", async (msg) => {
       const arena = await fetchArena("leaderboard");
       const report = await runMapFind({ base: WYRM_BASE, key: WYRM_KEY, code: SERVER_CODE, arenaKeys: arena ? Object.keys(arena) : [] });
       return void msg.reply({ files: [new AttachmentBuilder(Buffer.from(report, "utf8"), { name: "mapfind-output.txt" })] });
+    }
+
+    if (text === "mapfind2") {
+      if (!msg.member?.permissions.has("ManageGuild")) return;
+      await msg.reply("🔎 Reading the Wyrm minimap code, this takes up to ~1 minute...");
+      const report = await runMapFind2({ base: WYRM_BASE, key: WYRM_KEY, code: SERVER_CODE });
+      return void msg.reply({ files: [new AttachmentBuilder(Buffer.from(report, "utf8"), { name: "mapfind2-output.txt" })] });
     }
 
     const wantsDebug = text === "mapdebug";
