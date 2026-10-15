@@ -271,8 +271,10 @@ function normaliseMapData(md) {
 
 // The Wyrm website's own public feed: every server has a live "preview" picture of snake positions
 function findStatusServer(servers, arena) {
-  const mine = arena ? [arena.address, arena.ipv4Address, arena.ipv4].filter(Boolean).map(String) : [];
-  return servers.find(s => [s.code, s.address, s.ipv4Address, s.ipv4].some(v => v != null && (String(v) === SERVER_CODE || mine.includes(String(v))))) || null;
+  // Several servers share one IP (ports 443 / 444 / 475), so match the FULL address including the port
+  const mine = arena ? [arena.address, arena.ipv4Address, arena.ipv6Address].filter(Boolean).map(String) : [];
+  return servers.find(s => [s.address, s.ipv4Address, s.ipv6Address].some(v => v && mine.includes(String(v))))
+      || servers.find(s => String(s.code) === SERVER_CODE) || null;
 }
 
 let statusCache = { t: 0, md: null };
@@ -295,7 +297,7 @@ async function fetchMapFromStatus() {
     svg = svg.replace(/<rect\b[^>]*\bwidth="(?:100%|256)"[^>]*\/>/, "");
     buf = Buffer.from(svg, "utf8");
   }
-  const md = { svgImage: await loadImage(buf), players: arena?.players ?? match.players ?? null };
+  const md = { svgImage: await loadImage(buf), players: arena?.players ?? match.playerCount ?? null };
   statusCache = { t: Date.now(), md };
   return md;
 }
