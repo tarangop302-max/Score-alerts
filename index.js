@@ -4,6 +4,7 @@ const path = require("path");
 const https = require("https");
 const http = require("http");
 const { LB, MAP, drawLeaderboard, drawMap } = require("./render");
+const { runProbe } = require("./probe");
 
 // Bundled fonts so the images look the same on any host
 const fs = require("fs");
@@ -358,6 +359,14 @@ client.on("messageCreate", async (msg) => {
     let isCmd = mentioned;
     if (text.startsWith(PREFIX)) { isCmd = true; text = text.slice(PREFIX.length).trim(); }
     if (!isCmd) return;
+
+    // "!probe" — admin-only: test connection to the game server and post what it replies
+    if (text === "probe") {
+      if (!msg.member?.permissions.has("ManageGuild")) return;
+      await msg.reply("🔎 Probing the game server, this takes up to ~1 minute...");
+      const report = await runProbe(await fetchArena("leaderboard"));
+      return void msg.reply({ files: [new AttachmentBuilder(Buffer.from(report, "utf8"), { name: "probe-output.txt" })] });
+    }
 
     const wantsDebug = text === "mapdebug";
     const wantsMap = wantsDebug || /^(show\s*)?map$/.test(text) || /^show\s+(the\s+)?(live\s+)?map$/.test(text);
