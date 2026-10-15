@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "@napi-rs/canvas": "^0.1.65"
+    "@napi-rs/canvas": "^0.1.65",
+    "ws": "^8.18.0"
   }
 }
