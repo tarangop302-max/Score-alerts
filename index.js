@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits, AttachmentBuilder } = require("discord.js");
-const { createCanvas, GlobalFonts } = require("@napi-rs/canvas");
+const { createCanvas, GlobalFonts, loadImage } = require("@napi-rs/canvas");
 const path = require("path");
 const https = require("https");
 const http = require("http");
@@ -269,7 +269,38 @@ function normaliseMapData(md) {
   return md;
 }
 
+// The Wyrm website's own public feed: every server has a live "preview" picture of snake positions
+let statusCache = { t: 0, md: null };
+async function fetchMapFromStatus() {
+  if (statusCache.md && Date.now() - statusCache.t < 4000) return statusCache.md; // be gentle with the API
+  const [status, arena] = await Promise.all([wyrmFetch("/v1/arena/status"), fetchArena("leaderboard")]);
+  const servers = status.servers || [];
+  const mine = arena ? [arena.address, arena.ipv4Address, arena.ipv4].filter(Boolean).map(String) : [];
+  const match = servers.find(s => [s.code, s.address, s.ipv4Address, s.ipv4].some(v => v != null && (String(v) === SERVER_CODE || mine.includes(String(v)))));
+  if (!match) { console.log("MAP: server not found in /v1/arena/status. Server keys:", servers[0] ? Object.keys(servers[0]) : "none"); return null; }
+  const url = match.preview && match.preview.dataUrl;
+  if (!url || !url.startsWith("data:image/")) { console.log("MAP: no preview.dataUrl. Preview:", JSON.stringify(match.preview || null).slice(0, 200)); return null; }
+
+  const comma = url.indexOf(",");
+  const isB64 = url.slice(0, comma).includes(";base64");
+  let buf = isB64 ? Buffer.from(url.slice(comma + 1), "base64") : Buffer.from(decodeURIComponent(url.slice(comma + 1)), "utf8");
+  if (url.startsWith("data:image/svg+xml")) {
+    let svg = buf.toString("utf8");
+    // give the SVG a big pixel size (so it stays sharp) and drop its square background (we draw our own)
+    svg = svg.replace(/<svg\b([^>]*)>/, (m, a) => /\swidth=/.test(a) ? m : `<svg${a} width="1024" height="1024">`);
+    svg = svg.replace(/<rect\b[^>]*\bwidth="(?:100%|256)"[^>]*\/>/, "");
+    buf = Buffer.from(svg, "utf8");
+  }
+  const md = { svgImage: await loadImage(buf), players: arena?.players ?? match.players ?? null };
+  statusCache = { t: Date.now(), md };
+  return md;
+}
+
 async function fetchMapData() {
+  try {
+    const md = await fetchMapFromStatus();
+    if (md) return { md, arena: null };
+  } catch (e) { console.log("MAP: status feed failed:", e.message); }
   let arena;
   if (MAP_PATH) {
     const raw = await wyrmFetch(MAP_PATH);
@@ -407,7 +438,7 @@ client.on("messageCreate", async (msg) => {
 
     const file = new AttachmentBuilder(renderMapPng(md), { name: "map.png" });
     await msg.reply({
-      content: `🗺️ **Live map • Server ${SERVER_CODE}** — ${md.snakes?.length || 0} snakes`,
+      content: `🗺️ **Live map • Server ${SERVER_CODE}** — ${md.players ?? md.snakes?.length ?? 0} players`,
       files: [file],
       allowedMentions: { repliedUser: false },
     });
