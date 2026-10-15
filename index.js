@@ -5,6 +5,7 @@ const https = require("https");
 const http = require("http");
 const { LB, MAP, drawLeaderboard, drawMap } = require("./render");
 const { runProbe } = require("./probe");
+const { runMapFind } = require("./findmap");
 
 // Bundled fonts so the images look the same on any host
 const fs = require("fs");
@@ -366,6 +367,15 @@ client.on("messageCreate", async (msg) => {
       await msg.reply("🔎 Probing the game server, this takes up to ~1 minute...");
       const report = await runProbe(await fetchArena("leaderboard"));
       return void msg.reply({ files: [new AttachmentBuilder(Buffer.from(report, "utf8"), { name: "probe-output.txt" })] });
+    }
+
+    // "!mapfind" — admin-only: searches the Wyrm website/API for where the minimap data comes from
+    if (text === "mapfind") {
+      if (!msg.member?.permissions.has("ManageGuild")) return;
+      await msg.reply("🔎 Searching for the map data source, this takes up to ~1 minute...");
+      const arena = await fetchArena("leaderboard");
+      const report = await runMapFind({ base: WYRM_BASE, key: WYRM_KEY, code: SERVER_CODE, arenaKeys: arena ? Object.keys(arena) : [] });
+      return void msg.reply({ files: [new AttachmentBuilder(Buffer.from(report, "utf8"), { name: "mapfind-output.txt" })] });
     }
 
     const wantsDebug = text === "mapdebug";
